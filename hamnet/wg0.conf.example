@@ -1,0 +1,11 @@
+[Interface]
+PrivateKey = REPLACE_WITH_PRIVATE_KEY
+Address = 44.27.132.79/32, fe80::29b2:e119:a855:66af/128, 44.27.25.64/28
+DNS = 1.1.1.1,1.0.0.1
+MTU = 1380
+
+[Peer]
+PublicKey = DbJez+D2EqAB6eBndOVl5SNuGMN/DGBZv7Ke4ldN73s=
+Endpoint = 44.27.227.1:44000
+PersistentKeepalive = 20
+AllowedIPs = 0.0.0.0/0, ::/0

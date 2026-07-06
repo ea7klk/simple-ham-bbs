@@ -1,0 +1,7 @@
+.env
+data/
+hamnet/wg_confs/
+ssh/authorized_keys
+*.log
+__pycache__/
+.DS_Store

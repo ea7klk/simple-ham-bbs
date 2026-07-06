@@ -1,0 +1,27 @@
+Port 2222
+ListenAddress 0.0.0.0
+ListenAddress ::
+
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+PermitRootLogin no
+PasswordAuthentication yes
+PermitEmptyPasswords yes
+PubkeyAuthentication yes
+KbdInteractiveAuthentication no
+UsePAM no
+
+AllowUsers bbs
+PermitTTY yes
+X11Forwarding no
+AllowTcpForwarding no
+PermitTunnel no
+GatewayPorts no
+PermitUserEnvironment no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+Match User bbs
+    ForceCommand /usr/local/bin/bbs_session.sh

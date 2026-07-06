@@ -1,0 +1,45 @@
+services:
+  hamnet:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: hamnet-wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+    ports:
+      - "2222:2222/tcp"
+    volumes:
+      - ./hamnet/wg_confs:/config/wg_confs
+      - /lib/modules:/lib/modules:ro
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    restart: unless-stopped
+
+  bbs:
+    build:
+      context: ./bbs
+    container_name: hamnet-bbs
+    network_mode: "service:hamnet"
+    depends_on:
+      - hamnet
+    environment:
+      - BBS_USER_PASSWORD=${BBS_USER_PASSWORD:-change-this-password}
+      - BBS_GUEST_MODE=${BBS_GUEST_MODE:-false}
+      - BBS_NAME=${BBS_NAME:-HAMNET RADIO BBS}
+      - BBS_SYSOP=${BBS_SYSOP:-Sysop}
+      - BBS_SYSOPS=${BBS_SYSOPS:-}
+      - BBS_LOCATION=${BBS_LOCATION:-HamNet}
+      - BBS_WELCOME_TOPIC=${BBS_WELCOME_TOPIC:-Amateur radio notes, local nets, and packet-era experiments}
+    volumes:
+      - bbs-data:/var/lib/bbs
+      - ./ssh:/config/ssh:ro
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  bbs-data:
