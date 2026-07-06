@@ -82,6 +82,8 @@ Sysop users can administer accounts from the sysop menu:
 - Promote or demote users as sysops.
 - Disable or re-enable users.
 - Delete users.
+- Add or delete local message boards.
+- Delete individual messages from message boards.
 - Sysops cannot delete or disable their own account.
 - The BBS prevents removal of the last active sysop.
 
@@ -92,6 +94,8 @@ BBS_SYSOPS=EA1ABC,DL1ABC
 ```
 
 Calls listed in `BBS_SYSOPS` are always treated as sysops and cannot be demoted from inside the BBS.
+
+The local message board feature supports multiple boards. New installs start with a `General` board. Existing installs with the older flat `messages.json` format are migrated automatically into the `General` board the next time the BBS starts.
 
 For an open guest BBS, set this in `.env`:
 

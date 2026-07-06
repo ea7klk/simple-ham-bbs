@@ -39,7 +39,9 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MAIDENHEAD_RE = re.compile(
     r"^[A-Ra-r]{2}([0-9]{2}([A-Xa-x]{2}([0-9]{2}([A-Xa-x]{2})?)?)?)?$"
 )
+BOARD_ID_RE = re.compile(r"[^a-z0-9]+")
 PASSWORD_ITERATIONS = 200_000
+DEFAULT_BOARD_ID = "general"
 
 LANGUAGES = {
     "en": "English",
@@ -121,6 +123,74 @@ def save_json(path: Path, data) -> None:
     tmp.replace(path)
 
 
+def board_id_from_name(name: str) -> str:
+    board_id = BOARD_ID_RE.sub("-", name.lower()).strip("-")
+    return board_id[:40] or DEFAULT_BOARD_ID
+
+
+def default_board(messages: list | None = None) -> dict:
+    return {
+        "id": DEFAULT_BOARD_ID,
+        "name": "General",
+        "description": "General local messages",
+        "created": now(),
+        "messages": messages or [],
+    }
+
+
+def normalize_boards_data(data) -> dict:
+    if isinstance(data, list):
+        return {"boards": [default_board(data)]}
+
+    if not isinstance(data, dict):
+        return {"boards": [default_board()]}
+
+    boards = data.get("boards")
+    if not isinstance(boards, list):
+        return {"boards": [default_board()]}
+
+    normalized = []
+    seen_ids = set()
+    for board in boards:
+        if not isinstance(board, dict):
+            continue
+        name = str(board.get("name") or board.get("id") or "General").strip()
+        board_id = board_id_from_name(str(board.get("id") or name))
+        if board_id in seen_ids:
+            suffix = 2
+            base = board_id
+            while f"{base}-{suffix}" in seen_ids:
+                suffix += 1
+            board_id = f"{base}-{suffix}"
+        seen_ids.add(board_id)
+        messages = board.get("messages", [])
+        normalized.append(
+            {
+                "id": board_id,
+                "name": name[:60] or "General",
+                "description": str(board.get("description") or "")[:120],
+                "created": board.get("created") or now(),
+                "messages": messages if isinstance(messages, list) else [],
+            }
+        )
+
+    if not normalized:
+        normalized.append(default_board())
+    return {"boards": normalized}
+
+
+def load_boards() -> dict:
+    data = load_json(MESSAGES_FILE, {"boards": [default_board()]})
+    boards_data = normalize_boards_data(data)
+    if data != boards_data:
+        save_json(MESSAGES_FILE, boards_data)
+    return boards_data
+
+
+def save_boards(boards_data: dict) -> None:
+    save_json(MESSAGES_FILE, normalize_boards_data(boards_data))
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac(
@@ -172,8 +242,7 @@ def seed_data() -> None:
                 },
             ],
         )
-    if not MESSAGES_FILE.exists():
-        save_json(MESSAGES_FILE, [])
+    load_boards()
     if not USERS_FILE.exists():
         save_json(USERS_FILE, {})
 
@@ -420,16 +489,46 @@ def show_bulletins(lang: str) -> None:
     pause(lang)
 
 
-def show_messages(lang: str) -> None:
-    banner(lang)
-    messages = load_json(MESSAGES_FILE, [])
+def show_board_list(lang: str, boards: list) -> None:
+    line(t(lang, "message_boards_title"))
+    line("-" * 72)
+    for idx, board in enumerate(boards, 1):
+        count = len(board.get("messages", []))
+        description = board.get("description") or t(lang, "not_set")
+        line(f"{idx:02d}. {board.get('name', t(lang, 'untitled'))} ({count})")
+        line(f"    {description}")
+
+
+def select_board(lang: str, boards: list, prompt_key: str = "select_board") -> dict | None:
+    if not boards:
+        line(t(lang, "no_boards"))
+        pause(lang)
+        return None
+    while True:
+        show_board_list(lang, boards)
+        value = ask(f"{t(lang, prompt_key)}: ").strip().lower()
+        if value in {"q", "quit", "exit"}:
+            return None
+        if value.isdigit():
+            index = int(value) - 1
+            if 0 <= index < len(boards):
+                return boards[index]
+        for board in boards:
+            if value in {board.get("id", "").lower(), board.get("name", "").lower()}:
+                return board
+        line(t(lang, "invalid_choice"))
+
+
+def show_board_messages(lang: str, board: dict, include_numbers: bool = True) -> None:
+    messages = board.get("messages", [])
+    line(f"{t(lang, 'message_board')}: {board.get('name', t(lang, 'untitled'))}")
+    line("-" * 72)
     if not messages:
         line(t(lang, "no_messages"))
-        pause(lang)
         return
-
     for idx, message in enumerate(messages[-25:], 1):
-        line(f"{idx:02d}. {message.get('subject', t(lang, 'untitled'))}")
+        prefix = f"{idx:02d}. " if include_numbers else ""
+        line(f"{prefix}{message.get('subject', t(lang, 'untitled'))}")
         line(
             f"    {t(lang, 'from')} {message.get('from', 'UNKNOWN')} "
             f"{t(lang, 'at')} {message.get('created', '')}"
@@ -437,11 +536,30 @@ def show_messages(lang: str) -> None:
         for body_line in message.get("body", "").splitlines():
             line(f"    {body_line}")
         line()
+    if not include_numbers:
+        line()
+
+
+def show_messages(lang: str) -> None:
+    banner(lang)
+    boards_data = load_boards()
+    board = select_board(lang, boards_data["boards"], "select_board")
+    if not board:
+        return
+    banner(lang)
+    show_board_messages(lang, board)
     pause(lang)
 
 
 def post_message(callsign: str, lang: str) -> None:
     banner(lang)
+    boards_data = load_boards()
+    board = select_board(lang, boards_data["boards"], "select_board_post")
+    if not board:
+        return
+    banner(lang)
+    line(f"{t(lang, 'message_board')}: {board.get('name', t(lang, 'untitled'))}")
+    line()
     subject = ask(f"{t(lang, 'subject')}: ")[:80].strip()
     if not subject:
         line(t(lang, "cancelled"))
@@ -464,8 +582,7 @@ def post_message(callsign: str, lang: str) -> None:
         pause(lang)
         return
 
-    messages = load_json(MESSAGES_FILE, [])
-    messages.append(
+    board.setdefault("messages", []).append(
         {
             "from": callsign,
             "subject": subject,
@@ -473,7 +590,8 @@ def post_message(callsign: str, lang: str) -> None:
             "created": now(),
         }
     )
-    save_json(MESSAGES_FILE, messages[-500:])
+    board["messages"] = board["messages"][-500:]
+    save_boards(boards_data)
     line(t(lang, "message_posted"))
     pause(lang)
 
@@ -575,6 +693,90 @@ def delete_user(current_callsign: str, lang: str, users: dict) -> None:
     pause(lang)
 
 
+def add_message_board(lang: str) -> None:
+    boards_data = load_boards()
+    banner(lang)
+    show_board_list(lang, boards_data["boards"])
+    line()
+    name = ask(f"{t(lang, 'board_name')}: ").strip()[:60]
+    if not name:
+        line(t(lang, "cancelled"))
+        pause(lang)
+        return
+    board_id = board_id_from_name(name)
+    existing_ids = {board.get("id") for board in boards_data["boards"]}
+    if board_id in existing_ids:
+        line(t(lang, "board_exists"))
+        pause(lang)
+        return
+    description = ask(f"{t(lang, 'board_description')}: ").strip()[:120]
+    boards_data["boards"].append(
+        {
+            "id": board_id,
+            "name": name,
+            "description": description,
+            "created": now(),
+            "messages": [],
+        }
+    )
+    save_boards(boards_data)
+    line(t(lang, "board_created"))
+    pause(lang)
+
+
+def delete_message_board(lang: str) -> None:
+    boards_data = load_boards()
+    banner(lang)
+    board = select_board(lang, boards_data["boards"], "select_board_delete")
+    if not board:
+        return
+    if len(boards_data["boards"]) <= 1:
+        line(t(lang, "cannot_delete_last_board"))
+        pause(lang)
+        return
+    confirmation = ask(t(lang, "confirm_delete_board")).strip()
+    if confirmation != "DELETE":
+        line(t(lang, "delete_cancelled"))
+        pause(lang)
+        return
+    boards_data["boards"] = [
+        item for item in boards_data["boards"] if item.get("id") != board.get("id")
+    ]
+    save_boards(boards_data)
+    line(t(lang, "board_deleted"))
+    pause(lang)
+
+
+def delete_board_message(lang: str) -> None:
+    boards_data = load_boards()
+    banner(lang)
+    board = select_board(lang, boards_data["boards"], "select_board_message_delete")
+    if not board:
+        return
+    banner(lang)
+    show_board_messages(lang, board)
+    messages = board.get("messages", [])
+    if not messages:
+        pause(lang)
+        return
+    value = ask(f"{t(lang, 'message_number')}: ").strip()
+    if not value.isdigit():
+        line(t(lang, "invalid_message_number"))
+        pause(lang)
+        return
+    display_index = int(value) - 1
+    start_index = max(0, len(messages) - 25)
+    actual_index = start_index + display_index
+    if actual_index < start_index or actual_index >= len(messages):
+        line(t(lang, "invalid_message_number"))
+        pause(lang)
+        return
+    messages.pop(actual_index)
+    save_boards(boards_data)
+    line(t(lang, "message_deleted"))
+    pause(lang)
+
+
 def sysop_administration(current_callsign: str, lang: str) -> None:
     while True:
         users = load_json(USERS_FILE, {})
@@ -586,6 +788,9 @@ def sysop_administration(current_callsign: str, lang: str) -> None:
         line(f"  2. {t(lang, 'sysop_toggle_sysop')}")
         line(f"  3. {t(lang, 'sysop_toggle_disabled')}")
         line(f"  4. {t(lang, 'sysop_delete_user')}")
+        line(f"  5. {t(lang, 'sysop_add_board')}")
+        line(f"  6. {t(lang, 'sysop_delete_board')}")
+        line(f"  7. {t(lang, 'sysop_delete_message')}")
         line(f"  Q. {t(lang, 'menu_quit')}")
         line()
         choice = ask(f"{t(lang, 'select')}: ").lower()
@@ -608,6 +813,12 @@ def sysop_administration(current_callsign: str, lang: str) -> None:
             show_user_admin_list(lang, users)
             line()
             delete_user(current_callsign, lang, users)
+        elif choice == "5":
+            add_message_board(lang)
+        elif choice == "6":
+            delete_message_board(lang)
+        elif choice == "7":
+            delete_board_message(lang)
         elif choice in {"q", "quit", "exit"}:
             return
 
