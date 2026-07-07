@@ -148,6 +148,14 @@ func reverseSent(items []sentAPRS) []sentAPRS {
 	return out
 }
 
+func reverseReceived(items []receivedAPRS) []receivedAPRS {
+	out := make([]receivedAPRS, len(items))
+	for i := range items {
+		out[i] = items[len(items)-1-i]
+	}
+	return out
+}
+
 func asciiSafe(value string) string {
 	var b strings.Builder
 	for _, r := range value {

@@ -22,7 +22,7 @@ ENV APRSD_BIN=/opt/aprsd/bin/aprsd
 ENV PATH="/opt/aprsd/bin:${PATH}"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssh-server tini \
+    && apt-get install -y --no-install-recommends ca-certificates iproute2 openssh-server tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash bbs \

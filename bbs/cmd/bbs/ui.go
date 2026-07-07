@@ -5,6 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"os"
 	"strings"
 )
@@ -222,24 +223,25 @@ func newFormModel(a *app, lang, title string, fields []formField, buttons []stri
 	if len(buttons) == 0 {
 		buttons = []string{"save", "cancel"}
 	}
+	inputWidth := 40
 	for i := range fields {
 		switch fields[i].kind {
 		case fieldText, fieldPassword:
 			ti := textinput.New()
 			ti.SetValue(fields[i].value)
 			ti.CharLimit = fields[i].limit
-			ti.Width = panelContentWidth
+			ti.Width = inputWidth
 			ti.Prompt = ""
 			if fields[i].kind == fieldPassword {
 				ti.EchoMode = textinput.EchoPassword
-				ti.EchoCharacter = '•'
+				ti.EchoCharacter = '*'
 			}
 			fields[i].input = ti
 		case fieldTextArea:
 			ta := textarea.New()
 			ta.SetValue(fields[i].value)
 			ta.CharLimit = fields[i].limit
-			ta.SetWidth(panelContentWidth)
+			ta.SetWidth(panelContentWidth - 4)
 			ta.SetHeight(5)
 			ta.ShowLineNumbers = false
 			fields[i].area = ta
@@ -436,22 +438,31 @@ func (m formModel) renderButtons() string {
 func (m formModel) renderField(i int) string {
 	var b strings.Builder
 	f := &m.fields[i]
-	label := f.label
+	labelText := strings.TrimSpace(f.label)
 	if f.required {
-		label += " *"
+		labelText += " *"
 	}
+	label := labelText
 	if i == m.focus {
 		label = selectedStyle.Render(label)
 	} else {
 		label = titleStyle.Render(label)
 	}
-	b.WriteString(label + "\n")
 	switch f.kind {
 	case fieldText, fieldPassword:
-		b.WriteString(f.input.View() + "\n")
+		fieldWidth := panelContentWidth - lipgloss.Width(labelText) - 10
+		if fieldWidth > 34 {
+			fieldWidth = 34
+		}
+		if fieldWidth < 12 {
+			fieldWidth = 12
+		}
+		b.WriteString(label + " " + m.renderSingleLineField(f, i == m.focus, fieldWidth) + "\n")
 	case fieldTextArea:
+		b.WriteString(label + "\n")
 		b.WriteString(f.area.View() + "\n")
 	case fieldChoice:
+		b.WriteString(label + "\n")
 		for _, choice := range f.choices {
 			text := choice.label
 			if choice.value == f.value {
@@ -462,6 +473,55 @@ func (m formModel) renderField(i int) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func (m formModel) renderSingleLineField(f *formField, focused bool, width int) string {
+	display := f.input.Value()
+	if f.kind == fieldPassword {
+		display = strings.Repeat(string(f.input.EchoCharacter), len([]rune(display)))
+	}
+	if width <= 0 {
+		width = panelContentWidth - 2
+	}
+	runes := []rune(display)
+	pos := f.input.Position()
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	start := 0
+	if pos >= width {
+		start = pos - width + 1
+	}
+	end := start + width
+	if end > len(runes) {
+		end = len(runes)
+	}
+	visible := append([]rune{}, runes[start:end]...)
+	if focused {
+		cursorPos := pos - start
+		if cursorPos < 0 {
+			cursorPos = 0
+		}
+		if cursorPos >= width {
+			cursorPos = width - 1
+		}
+		for len(visible) <= cursorPos {
+			visible = append(visible, ' ')
+		}
+		left := string(visible[:cursorPos])
+		cell := string(visible[cursorPos])
+		right := ""
+		if cursorPos+1 < len(visible) {
+			right = string(visible[cursorPos+1:])
+		}
+		line := left + cursorStyle.Render(cell) + right
+		return "[" + line + strings.Repeat(" ", width-len(visible)) + "]"
+	}
+	line := string(visible)
+	return "[" + line + strings.Repeat(" ", width-len(visible)) + "]"
 }
 
 func (m formModel) visibleFieldRange(room int) (int, int) {
@@ -500,13 +560,16 @@ func (m formModel) fieldLines(i int) int {
 	if m.fields[i].kind == fieldTextArea {
 		return 6
 	}
+	if m.fields[i].kind == fieldText || m.fields[i].kind == fieldPassword {
+		return 1
+	}
 	return 2
 }
 
 func (a *app) runMenu(lang, title, header string, opts []option) string {
 	clearScreen()
 	m := menuModel{app: a, lang: lang, title: title, header: header, options: opts}
-	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run()
+	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
 	if err != nil {
 		return "q"
 	}
@@ -516,7 +579,7 @@ func (a *app) runMenu(lang, title, header string, opts []option) string {
 func (a *app) runForm(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
 	clearScreen()
 	m := newFormModel(a, lang, title, fields, buttons)
-	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run()
+	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
 	if err != nil {
 		return "cancel", nil, false
 	}
@@ -544,8 +607,15 @@ func (m infoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc", "enter", "q":
+		case "ctrl+c", "esc", "q":
 			m.chosen = "q"
+			return m, tea.Quit
+		case "enter":
+			if len(m.actions) == 1 && strings.EqualFold(m.actions[0].label, m.app.t(m.lang, "ok_button")) {
+				m.chosen = m.actions[0].value
+			} else {
+				m.chosen = "q"
+			}
 			return m, tea.Quit
 		case "up", "k":
 			if m.offset > 0 {
@@ -642,7 +712,7 @@ func (a *app) showInfoActions(lang, title string, rows [][]string, actions []opt
 		}
 	}
 	model := infoModel{app: a, lang: lang, title: title, lines: lines, actions: actions}
-	done, err := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout)).Run()
+	done, err := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
 	if err != nil {
 		return "q"
 	}

@@ -24,6 +24,8 @@ services:
       context: ./bbs
     container_name: hamnet-bbs
     network_mode: "service:hamnet"
+    cap_add:
+      - NET_ADMIN
     depends_on:
       - hamnet
     environment:
@@ -36,8 +38,9 @@ services:
       - BBS_WELCOME_TOPIC=${BBS_WELCOME_TOPIC:-Amateur radio notes, local nets, and packet-era experiments}
       - APRS_IS_SERVER=${APRS_IS_SERVER:-rotate.aprs2.net}
       - APRS_IS_PORT=${APRS_IS_PORT:-14580}
-      - APRS_APP_NAME=${APRS_APP_NAME:-HamNetBBS}
-      - APRS_APP_VERSION=${APRS_APP_VERSION:-0.1}
+      - APRSD_BIN=${APRSD_BIN:-/opt/aprsd/bin/aprsd}
+      - APRS_RECEIVER_CALLSIGN=${APRS_RECEIVER_CALLSIGN:-}
+      - BBS_FALLBACK_GATEWAY=${BBS_FALLBACK_GATEWAY:-172.18.0.1}
     volumes:
       - bbs-data:/var/lib/bbs
       - ./ssh:/config/ssh:ro

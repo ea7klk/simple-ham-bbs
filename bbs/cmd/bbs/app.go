@@ -13,21 +13,24 @@ func newApp() (*app, error) {
 	dataDir := env("BBS_DATA_DIR", "/var/lib/bbs")
 	port, _ := strconv.Atoi(env("APRS_IS_PORT", "14580"))
 	cfg := config{
-		dataDir:       dataDir,
-		usersFile:     filepath.Join(dataDir, "users.json"),
-		messagesFile:  filepath.Join(dataDir, "messages.json"),
-		bulletinsFile: filepath.Join(dataDir, "bulletins.json"),
-		aprsSentFile:  filepath.Join(dataDir, "aprs", "sent.json"),
-		transFile:     env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
-		name:          env("BBS_NAME", "HAMNET RADIO BBS"),
-		sysopName:     env("BBS_SYSOP", "Sysop"),
-		sysops:        parseSysops(os.Getenv("BBS_SYSOPS")),
-		location:      env("BBS_LOCATION", "HamNet"),
-		topic:         env("BBS_WELCOME_TOPIC", "Amateur radio notes, local nets, and packet-era experiments"),
-		aprsServer:    env("APRS_IS_SERVER", "rotate.aprs2.net"),
-		aprsPort:      port,
-		aprsApp:       env("APRS_APP_NAME", "HamNetBBS"),
-		aprsVersion:   env("APRS_APP_VERSION", "0.1"),
+		dataDir:              dataDir,
+		usersFile:            filepath.Join(dataDir, "users.json"),
+		messagesFile:         filepath.Join(dataDir, "messages.json"),
+		bulletinsFile:        filepath.Join(dataDir, "bulletins.json"),
+		aprsSentFile:         filepath.Join(dataDir, "aprs", "sent-aprsd.json"),
+		aprsReceivedFile:     filepath.Join(dataDir, "aprs", "received.json"),
+		aprsLogFile:          filepath.Join(dataDir, "aprs", "aprsd.log"),
+		aprsReceiverLogFile:  filepath.Join(dataDir, "aprs", "receiver.log"),
+		transFile:            env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
+		name:                 env("BBS_NAME", "HAMNET RADIO BBS"),
+		sysopName:            env("BBS_SYSOP", "Sysop"),
+		sysops:               parseSysops(os.Getenv("BBS_SYSOPS")),
+		location:             env("BBS_LOCATION", "HamNet"),
+		topic:                env("BBS_WELCOME_TOPIC", "Amateur radio notes, local nets, and packet-era experiments"),
+		aprsServer:           env("APRS_IS_SERVER", "rotate.aprs2.net"),
+		aprsPort:             port,
+		aprsdBin:             env("APRSD_BIN", "/opt/aprsd/bin/aprsd"),
+		aprsReceiverCallsign: env("APRS_RECEIVER_CALLSIGN", ""),
 	}
 	text := map[string]map[string]any{}
 	if err := readJSON(cfg.transFile, &text, map[string]map[string]any{}); err != nil {
@@ -94,6 +97,9 @@ func (a *app) seedData() error {
 	if err := os.MkdirAll(a.cfg.dataDir, 0o755); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Join(a.cfg.dataDir, "aprs"), 0o755); err != nil {
+		return err
+	}
 	if !exists(a.cfg.bulletinsFile) {
 		bulletins := []bulletin{
 			{Title: "Welcome", Body: "This is a small HamNet-ready BBS for radio operators.\nUse it for local notes, net announcements, and station contact info.", Updated: now()},
@@ -108,6 +114,8 @@ func (a *app) seedData() error {
 			return err
 		}
 	}
+	_ = os.Remove(filepath.Join(a.cfg.dataDir, "aprs", "sent.json"))
+	_ = a.normalizeReceivedAPRSStore()
 	_, err := a.loadBoards()
 	return err
 }

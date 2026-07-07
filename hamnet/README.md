@@ -16,6 +16,12 @@ The BBS container shares the WireGuard container's network namespace. That means
 - Docker publishes that same listener as host port `2222`.
 - Traffic arriving through the WireGuard interface can reach the BBS directly on SSH port `2222`.
 
+During local development without a valid WireGuard config, the shared namespace
+may start without a default route. The BBS container startup checks for that
+case and adds a Docker gateway fallback route so outbound services such as
+APRS-IS can still work. If WireGuard provides its own default route, the check
+does nothing.
+
 If you do not want containerized WireGuard, you can remove the `hamnet` service and give the `bbs` service a normal port mapping instead:
 
 ```yaml

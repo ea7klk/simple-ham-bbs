@@ -2,7 +2,7 @@
 
 A small, fully Dockerized SSH BBS for amateur radio operators. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
 
-The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending.
+The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending/receiving.
 
 ## Why This Shape
 
@@ -141,25 +141,52 @@ The supplied WireGuard profile has these public/non-secret values:
 
 The private key you pasted is deliberately not written into tracked files. Put it only in `hamnet/wg_confs/wg0.conf` or rotate it before using this repository anywhere public.
 
-## APRS Roadmap
+## APRS Messaging
 
 The APRS menu currently lets each user set `Enable APRS` to `true` or `false`
 through a dialog-style form. The send screen can send APRS messages through
-APRS-IS, calculates the APRS-IS passcode automatically from the caller's
-callsign, and keeps the latest 10 sent APRS messages per user. APRS messaging
-uses the caller's default SSID `-0`.
+the upstream [`craigerl/aprsd`](https://github.com/craigerl/aprsd) executable.
+For each send, the BBS uses the logged-in user's callsign with SSID `-0`,
+calculates the APRS-IS passcode automatically, and asks `aprsd` to send the
+message. Messages longer than the APRS message body limit are split into
+numbered parts before sending.
 
-The Docker image also includes the upstream
-[`craigerl/aprsd`](https://github.com/craigerl/aprsd) executable for later
-integration work. The stable executable path inside the BBS container is:
+The latest 10 sent APRS messages per user are stored in
+`/var/lib/bbs/aprs/sent-aprsd.json`. The old direct-sender store
+`/var/lib/bbs/aprs/sent.json` is removed on startup.
+
+The container also starts a persistent APRS receiver process:
+
+```sh
+/usr/local/bin/bbs_app aprs-receiver
+```
+
+It connects to APRS-IS with `filter t/m`, listens for APRS message packets, and
+stores messages addressed to BBS users who have `Enable APRS` set to `true`.
+Received messages are stored per callsign in
+`/var/lib/bbs/aprs/received.json` and are shown under `Received APRS messages`
+in the APRS menu. APRS message IDs appended by senders, such as `{2044`, are
+removed from the user-facing message text before storage/display, while the raw
+packet field is preserved as received. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
+receive-only APRS-IS login callsign; if it is empty, the receiver uses the
+first valid callsign from `BBS_SYSOPS`, then falls back to `N0CALL`.
+The receiver exits once per hour; the container entrypoint immediately restarts
+it so the APRS-IS connection is refreshed regularly.
+
+Before calling `aprsd`, the BBS checks that the configured APRS-IS server and
+port are reachable. Full `aprsd` command output is appended to
+`/var/lib/bbs/aprs/aprsd.log`, which is tailed into `docker-compose logs bbs`.
+Receiver logs are written to `/var/lib/bbs/aprs/receiver.log` and are tailed
+into the same Docker logs.
+
+The stable `aprsd` executable path inside the BBS container is:
 
 ```sh
 /opt/aprsd/bin/aprsd
 ```
 
-A later implementation can add:
+Future APRS work can add:
 
-- Received message polling under `/var/lib/bbs/aprs/`
 - Local-only dry-run mode for testing
 - A menu screen for station beacons and delivery acknowledgements
 

@@ -6,7 +6,6 @@ import (
 )
 
 func main() {
-	defer fmt.Print("\033[?25h\033[?2004l")
 	a, err := newApp()
 	if err != nil {
 		fmt.Println(err)
@@ -16,6 +15,14 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "aprs-receiver" {
+		if err := a.runAPRSReceiver(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		return
+	}
+	defer fmt.Print("\033[?25h\033[?2004l")
 	if err := a.run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

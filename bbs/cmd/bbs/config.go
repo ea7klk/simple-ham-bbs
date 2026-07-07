@@ -3,21 +3,24 @@ package main
 import (
 	"github.com/charmbracelet/lipgloss"
 	"regexp"
+	"time"
 )
 
 const (
-	defaultBoardID     = "general"
-	passwordIterations = 200000
-	aprsMessageLimit   = 67
-	sentHistoryLimit   = 10
-	screenWidth        = 80
-	screenHeight       = 24
-	panelBorderWidth   = 2
-	panelPaddingWidth  = 2
-	panelVerticalFrame = 2
-	panelStyleWidth    = screenWidth - panelBorderWidth
-	panelContentWidth  = panelStyleWidth - panelPaddingWidth
-	panelContentHeight = screenHeight - panelVerticalFrame
+	defaultBoardID              = "general"
+	passwordIterations          = 200000
+	aprsMessageLimit            = 67
+	sentHistoryLimit            = 10
+	receivedHistoryLimit        = 100
+	aprsReceiverRestartInterval = time.Hour
+	screenWidth                 = 80
+	screenHeight                = 24
+	panelBorderWidth            = 2
+	panelPaddingWidth           = 2
+	panelVerticalFrame          = 2
+	panelStyleWidth             = screenWidth - panelBorderWidth
+	panelContentWidth           = panelStyleWidth - panelPaddingWidth
+	panelContentHeight          = screenHeight - panelVerticalFrame
 )
 
 var (
@@ -26,34 +29,39 @@ var (
 	emailRE        = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 	maidenheadRE   = regexp.MustCompile(`^[A-Ra-r]{2}([0-9]{2}([A-Xa-x]{2}([0-9]{2}([A-Xa-x]{2})?)?)?)?$`)
 	boardIDRE      = regexp.MustCompile(`[^a-z0-9]+`)
+	asciiBorder    = lipgloss.Border{Top: "-", Bottom: "-", Left: "|", Right: "|", TopLeft: "+", TopRight: "+", BottomLeft: "+", BottomRight: "+"}
 	titleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	subtitleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	selectedStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("14"))
 	dimStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	successStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	panelStyle     = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("14")).Padding(0, 1)
-	formPanelStyle = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("10")).Padding(0, 1)
+	cursorStyle    = lipgloss.NewStyle().Reverse(true)
+	panelStyle     = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(asciiBorder).BorderForeground(lipgloss.Color("14")).Padding(0, 1)
+	formPanelStyle = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(asciiBorder).BorderForeground(lipgloss.Color("10")).Padding(0, 1)
 	languages      = map[string]string{"en": "English", "es": "Espanol", "fr": "Francais", "de": "Deutsch"}
 	languageOrder  = []string{"en", "es", "fr", "de"}
 )
 
 type config struct {
-	dataDir       string
-	usersFile     string
-	messagesFile  string
-	bulletinsFile string
-	aprsSentFile  string
-	transFile     string
-	name          string
-	sysopName     string
-	sysops        map[string]bool
-	location      string
-	topic         string
-	aprsServer    string
-	aprsPort      int
-	aprsApp       string
-	aprsVersion   string
+	dataDir              string
+	usersFile            string
+	messagesFile         string
+	bulletinsFile        string
+	aprsSentFile         string
+	aprsReceivedFile     string
+	aprsLogFile          string
+	aprsReceiverLogFile  string
+	transFile            string
+	name                 string
+	sysopName            string
+	sysops               map[string]bool
+	location             string
+	topic                string
+	aprsServer           string
+	aprsPort             int
+	aprsdBin             string
+	aprsReceiverCallsign string
 }
 
 type app struct {
@@ -105,10 +113,28 @@ type boardsData struct {
 }
 
 type sentAPRS struct {
-	At     string `json:"at"`
-	To     string `json:"to"`
+	At       string         `json:"at"`
+	From     string         `json:"from"`
+	To       string         `json:"to"`
+	Text     string         `json:"text"`
+	Status   string         `json:"status"`
+	Passcode int            `json:"passcode,omitempty"`
+	Parts    []sentAPRSPart `json:"parts,omitempty"`
+}
+
+type sentAPRSPart struct {
+	Number int    `json:"number"`
 	Text   string `json:"text"`
 	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type receivedAPRS struct {
+	At   string `json:"at"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	Text string `json:"text"`
+	Raw  string `json:"raw,omitempty"`
 }
 
 type option struct {

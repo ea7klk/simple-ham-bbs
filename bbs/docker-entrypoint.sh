@@ -6,7 +6,7 @@ set -euo pipefail
 
 mkdir -p /etc/bbs
 {
-  for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRS_APP_NAME APRS_APP_VERSION APRSD_BIN; do
+  for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRSD_BIN APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY; do
     printf '%s=%q\n' "$name" "${!name:-}"
   done
 } > /etc/bbs/bbs.env
@@ -18,10 +18,32 @@ else
   echo "bbs:${BBS_USER_PASSWORD}" | chpasswd
 fi
 
-mkdir -p /run/sshd /var/lib/bbs /home/bbs/.ssh
+data_dir="${BBS_DATA_DIR:-/var/lib/bbs}"
+mkdir -p /run/sshd "$data_dir/aprs" /home/bbs/.ssh
+touch "$data_dir/aprs/aprsd.log"
+touch "$data_dir/aprs/receiver.log"
 chown -R bbs:bbs /home/bbs/.ssh
-chown -R bbs:bbs /var/lib/bbs || echo "Warning: could not change ownership of /var/lib/bbs"
+chown -R bbs:bbs "$data_dir" || echo "Warning: could not change ownership of $data_dir"
 chmod 700 /home/bbs/.ssh
+rm -f "$data_dir/aprs/sent.json"
+
+if command -v ip >/dev/null 2>&1 && ! ip route show default | grep -q '^default '; then
+  if ip route add default via "${BBS_FALLBACK_GATEWAY:-172.18.0.1}" dev eth0; then
+    echo "Added fallback Docker default route for outbound services."
+  else
+    echo "Warning: could not add fallback Docker default route." >&2
+  fi
+fi
+
+(
+  while true; do
+    /usr/local/bin/bbs_app aprs-receiver
+    echo "$(date -u '+%Y-%m-%d %H:%M UTC') APRS receiver exited; restarting in 10 seconds." >> "$data_dir/aprs/receiver.log"
+    sleep 10
+  done
+) &
+
+tail -n 0 -F "$data_dir/aprs/aprsd.log" "$data_dir/aprs/receiver.log" &
 
 if [ -f /config/ssh/authorized_keys ]; then
   cp /config/ssh/authorized_keys /home/bbs/.ssh/authorized_keys
