@@ -1,12 +1,29 @@
-FROM python:3.12-slim
+FROM golang:1.22-bookworm AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+RUN go build -trimpath -ldflags="-s -w" -o /out/bbs_app ./cmd/bbs
+
+FROM python:3.12-slim AS aprsd
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-server tini \
+    && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/bbs-requirements.txt
-RUN pip install --no-cache-dir -r /tmp/bbs-requirements.txt \
-    && rm /tmp/bbs-requirements.txt
+RUN python -m venv /opt/aprsd \
+    && /opt/aprsd/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/aprsd/bin/pip install --no-cache-dir git+https://github.com/craigerl/aprsd.git
+
+FROM python:3.12-slim
+
+ENV APRSD_BIN=/opt/aprsd/bin/aprsd
+ENV PATH="/opt/aprsd/bin:${PATH}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates openssh-server tini \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash bbs \
     && mkdir -p /run/sshd /var/lib/bbs /home/bbs/.ssh \
@@ -14,13 +31,13 @@ RUN useradd --create-home --shell /bin/bash bbs \
     && chmod 700 /home/bbs/.ssh
 
 COPY sshd_config /etc/ssh/sshd_config
-COPY bbs_app.py /usr/local/bin/bbs_app.py
-COPY bbs_lib /usr/local/bin/bbs_lib
+COPY --from=build /out/bbs_app /usr/local/bin/bbs_app
+COPY --from=aprsd /opt/aprsd /opt/aprsd
 COPY translations.json /usr/local/bin/translations.json
 COPY bbs_session.sh /usr/local/bin/bbs_session.sh
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN chmod 755 /usr/local/bin/bbs_app.py /usr/local/bin/bbs_session.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/bbs_app /usr/local/bin/bbs_session.sh /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 2222
 

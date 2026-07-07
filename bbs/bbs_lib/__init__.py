@@ -1,1 +1,0 @@
-"""HAMNET BBS application package."""

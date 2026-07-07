@@ -34,6 +34,10 @@ services:
       - BBS_SYSOPS=${BBS_SYSOPS:-}
       - BBS_LOCATION=${BBS_LOCATION:-HamNet}
       - BBS_WELCOME_TOPIC=${BBS_WELCOME_TOPIC:-Amateur radio notes, local nets, and packet-era experiments}
+      - APRS_IS_SERVER=${APRS_IS_SERVER:-rotate.aprs2.net}
+      - APRS_IS_PORT=${APRS_IS_PORT:-14580}
+      - APRS_APP_NAME=${APRS_APP_NAME:-HamNetBBS}
+      - APRS_APP_VERSION=${APRS_APP_VERSION:-0.1}
     volumes:
       - bbs-data:/var/lib/bbs
       - ./ssh:/config/ssh:ro

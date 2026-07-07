@@ -6,7 +6,7 @@ PORT = 14580
 CALLSIGN = "EA7KLK"
 PASSCODE = "19875"
 # 't/m' filters for text messages only
-LOGIN_LINE = f"user {CALLSIGN} pass {PASSCODE} vers PyClient 1.0 filter b/EA7KLK-0 t/m\r\n"
+LOGIN_LINE = f"user {CALLSIGN} pass {PASSCODE} vers PyClient 1.0 filter g/EA* \r\n"
 
 def connect_aprs():
     # Create TCP socket

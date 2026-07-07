@@ -1,0 +1,175 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+func newApp() (*app, error) {
+	dataDir := env("BBS_DATA_DIR", "/var/lib/bbs")
+	port, _ := strconv.Atoi(env("APRS_IS_PORT", "14580"))
+	cfg := config{
+		dataDir:       dataDir,
+		usersFile:     filepath.Join(dataDir, "users.json"),
+		messagesFile:  filepath.Join(dataDir, "messages.json"),
+		bulletinsFile: filepath.Join(dataDir, "bulletins.json"),
+		aprsSentFile:  filepath.Join(dataDir, "aprs", "sent.json"),
+		transFile:     env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
+		name:          env("BBS_NAME", "HAMNET RADIO BBS"),
+		sysopName:     env("BBS_SYSOP", "Sysop"),
+		sysops:        parseSysops(os.Getenv("BBS_SYSOPS")),
+		location:      env("BBS_LOCATION", "HamNet"),
+		topic:         env("BBS_WELCOME_TOPIC", "Amateur radio notes, local nets, and packet-era experiments"),
+		aprsServer:    env("APRS_IS_SERVER", "rotate.aprs2.net"),
+		aprsPort:      port,
+		aprsApp:       env("APRS_APP_NAME", "HamNetBBS"),
+		aprsVersion:   env("APRS_APP_VERSION", "0.1"),
+	}
+	text := map[string]map[string]any{}
+	if err := readJSON(cfg.transFile, &text, map[string]map[string]any{}); err != nil {
+		return nil, err
+	}
+	return &app{cfg: cfg, text: text}, nil
+}
+
+func env(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func parseSysops(raw string) map[string]bool {
+	sysops := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		item = normalizeCallsign(item)
+		if item != "" {
+			sysops[item] = true
+		}
+	}
+	return sysops
+}
+
+func (a *app) t(lang, key string) string {
+	if byLang, ok := a.text[lang]; ok {
+		if value, ok := byLang[key].(string); ok {
+			return value
+		}
+	}
+	if byLang, ok := a.text["en"]; ok {
+		if value, ok := byLang[key].(string); ok {
+			return value
+		}
+	}
+	return key
+}
+
+func (a *app) tList(lang, key string) []string {
+	raw := a.text["en"][key]
+	if byLang, ok := a.text[lang]; ok {
+		if value, ok := byLang[key]; ok {
+			raw = value
+		}
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, fmt.Sprint(item))
+	}
+	return out
+}
+
+func (a *app) banner(lang string) string {
+	return titleStyle.Render(a.cfg.name) + "\n" + subtitleStyle.Render(a.cfg.location+" - "+a.cfg.topic) + "\n\n"
+}
+
+func (a *app) seedData() error {
+	if err := os.MkdirAll(a.cfg.dataDir, 0o755); err != nil {
+		return err
+	}
+	if !exists(a.cfg.bulletinsFile) {
+		bulletins := []bulletin{
+			{Title: "Welcome", Body: "This is a small HamNet-ready BBS for radio operators.\nUse it for local notes, net announcements, and station contact info.", Updated: now()},
+			{Title: "Operating Notes", Body: "Keep traffic courteous and relevant to amateur radio.\nDo not post private keys, passwords, or third-party personal data.", Updated: now()},
+		}
+		if err := writeJSON(a.cfg.bulletinsFile, bulletins); err != nil {
+			return err
+		}
+	}
+	if !exists(a.cfg.usersFile) {
+		if err := writeJSON(a.cfg.usersFile, map[string]userProfile{}); err != nil {
+			return err
+		}
+	}
+	_, err := a.loadBoards()
+	return err
+}
+
+func (a *app) run() error {
+	callsign, profile, err := a.authenticate()
+	if err != nil {
+		if errors.Is(err, errLoginCancelled) {
+			return nil
+		}
+		return err
+	}
+	lang := profile.Language
+	if lang == "" {
+		lang = "en"
+	}
+	for {
+		header := fmt.Sprintf("%s %s", a.t(lang, "logged_in_as"), callsign)
+		if a.isSysop(callsign, profile) {
+			header += " [" + a.t(lang, "sysop_role") + "]"
+		}
+		header += "    " + a.t(lang, "sysop") + ": " + a.cfg.sysopName
+		opts := []option{
+			{"1", a.t(lang, "menu_bulletins")},
+			{"2", a.t(lang, "menu_messages")},
+			{"3", a.t(lang, "menu_post")},
+			{"4", a.t(lang, "menu_directory")},
+			{"5", a.t(lang, "menu_profile")},
+			{"6", a.t(lang, "menu_resources")},
+			{"7", a.t(lang, "menu_aprs")},
+			{"8", a.t(lang, "menu_about")},
+		}
+		if a.isSysop(callsign, profile) {
+			opts = append(opts, option{"9", a.t(lang, "menu_sysop")})
+		}
+		opts = append(opts, option{"q", a.t(lang, "menu_quit")})
+		choice := a.runMenu(lang, a.t(lang, "select"), header, opts)
+		switch choice {
+		case "1":
+			a.showBulletins(lang)
+		case "2":
+			a.showMessages(callsign, lang)
+		case "3":
+			a.postMessage(callsign, lang)
+		case "4":
+			a.stationDirectory(lang)
+		case "5":
+			profile = a.changeProfile(callsign, profile, lang)
+			lang = profile.Language
+		case "6":
+			a.radioResources(lang)
+		case "7":
+			profile = a.aprsMenu(callsign, profile, lang)
+		case "8":
+			a.about(lang)
+		case "9":
+			if a.isSysop(callsign, profile) {
+				a.sysopMenu(callsign, lang)
+			}
+		case "q":
+			fmt.Println(a.banner(lang) + a.t(lang, "goodbye"))
+			return nil
+		}
+	}
+}

@@ -8,4 +8,4 @@ if [ -f /etc/bbs/bbs.env ]; then
   set +a
 fi
 
-exec /usr/local/bin/bbs_app.py
+exec /usr/local/bin/bbs_app

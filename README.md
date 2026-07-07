@@ -2,18 +2,18 @@
 
 A small, fully Dockerized SSH BBS for amateur radio operators. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
 
-The first version is intentionally no-frills: Rich-powered terminal panels, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and a placeholder integration point for APRS messaging.
+The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending.
 
 ## Why This Shape
 
-This project uses OpenSSH as the transport and a small Python BBS application as the forced SSH command. That keeps the first deployment simple, inspectable, and easy to extend. If you later want to swap the app layer for a larger open-source BBS package such as Synchronet or ENiGMA 1/2, the container boundary and HamNet wiring can stay mostly the same.
+This project uses OpenSSH as the transport and a small Go BBS application as the forced SSH command. The terminal interface is built with Charm's Bubble Tea, Bubbles, and Lip Gloss toolkits. That keeps the first deployment simple, inspectable, and easy to extend. If you later want to swap the app layer for a larger open-source BBS package such as Synchronet or ENiGMA 1/2, the container boundary and HamNet wiring can stay mostly the same.
 
 ## Files
 
 - `compose.yaml` runs WireGuard and the BBS containers.
 - `bbs/` contains the SSH server image and BBS application.
-- `bbs/bbs_lib/` contains the modular Python application code.
-- `bbs/requirements.txt` installs the Rich terminal UI dependency.
+- `bbs/cmd/bbs/` contains the Go BBS application.
+- `bbs/go.mod` declares the Charm terminal UI dependencies.
 - `hamnet/wg0.conf.example` contains a safe, redacted WireGuard example.
 - `hamnet/wg_confs/` is ignored by git and should contain the real WireGuard config.
 - `bbs-data` is the Docker named volume that stores users/messages/bulletins.
@@ -76,7 +76,7 @@ The SSH account is only the transport. The BBS has its own callsign-based accoun
 - BBS passwords are stored as salted PBKDF2-SHA256 hashes.
 - Returning users must enter their BBS password after entering their callsign.
 - The menu and profile flow are shown in the user's selected language.
-- Profile changes are available from `Change my profile`, including password changes with current-password verification.
+- Profile changes are available from `Change my profile`, including password changes with matching password fields.
 - Interactive terminals can use cursor keys and Enter for menus; dialog-style forms use Tab to move between fields/buttons, direct typing to edit, the Save/Cancel buttons, and F2 as a save shortcut. Long message text fields word-wrap, and Up/Down scroll within the text field instead of moving form focus. Scripted/non-interactive sessions can still type menu numbers and field values.
 - Menu translations live in `bbs/translations.json`, separate from the main BBS application code.
 
@@ -149,12 +149,19 @@ APRS-IS, calculates the APRS-IS passcode automatically from the caller's
 callsign, and keeps the latest 10 sent APRS messages per user. APRS messaging
 uses the caller's default SSID `-0`.
 
+The Docker image also includes the upstream
+[`craigerl/aprsd`](https://github.com/craigerl/aprsd) executable for later
+integration work. The stable executable path inside the BBS container is:
+
+```sh
+/opt/aprsd/bin/aprsd
+```
+
 A later implementation can add:
 
-- APRS-IS connection settings through `.env`
 - Received message polling under `/var/lib/bbs/aprs/`
 - Local-only dry-run mode for testing
-- A menu screen for inbox, outbox, and station beacons
+- A menu screen for station beacons and delivery acknowledgements
 
 ## Operations
 
