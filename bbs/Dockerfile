@@ -4,6 +4,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-server tini \
     && rm -rf /var/lib/apt/lists/*
 
+COPY requirements.txt /tmp/bbs-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/bbs-requirements.txt \
+    && rm /tmp/bbs-requirements.txt
+
 RUN useradd --create-home --shell /bin/bash bbs \
     && mkdir -p /run/sshd /var/lib/bbs /home/bbs/.ssh \
     && chown -R bbs:bbs /var/lib/bbs /home/bbs/.ssh \
@@ -11,6 +15,7 @@ RUN useradd --create-home --shell /bin/bash bbs \
 
 COPY sshd_config /etc/ssh/sshd_config
 COPY bbs_app.py /usr/local/bin/bbs_app.py
+COPY bbs_lib /usr/local/bin/bbs_lib
 COPY translations.json /usr/local/bin/translations.json
 COPY bbs_session.sh /usr/local/bin/bbs_session.sh
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

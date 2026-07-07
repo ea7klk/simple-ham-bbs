@@ -2,7 +2,7 @@
 
 A small, fully Dockerized SSH BBS for amateur radio operators. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
 
-The first version is intentionally no-frills: ANSI text, simple menus, a local message board, station directory, bulletins, and a placeholder integration point for APRS messaging.
+The first version is intentionally no-frills: Rich-powered terminal panels, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and a placeholder integration point for APRS messaging.
 
 ## Why This Shape
 
@@ -12,6 +12,8 @@ This project uses OpenSSH as the transport and a small Python BBS application as
 
 - `compose.yaml` runs WireGuard and the BBS containers.
 - `bbs/` contains the SSH server image and BBS application.
+- `bbs/bbs_lib/` contains the modular Python application code.
+- `bbs/requirements.txt` installs the Rich terminal UI dependency.
 - `hamnet/wg0.conf.example` contains a safe, redacted WireGuard example.
 - `hamnet/wg_confs/` is ignored by git and should contain the real WireGuard config.
 - `bbs-data` is the Docker named volume that stores users/messages/bulletins.
@@ -75,6 +77,7 @@ The SSH account is only the transport. The BBS has its own callsign-based accoun
 - Returning users must enter their BBS password after entering their callsign.
 - The menu and profile flow are shown in the user's selected language.
 - Profile changes are available from `Change my profile`, including password changes with current-password verification.
+- Interactive terminals can use cursor keys and Enter for menus; dialog-style forms use Tab to move between fields/buttons, direct typing to edit, the Save/Cancel buttons, and F2 as a save shortcut. Long message text fields word-wrap, and Up/Down scroll within the text field instead of moving form focus. Scripted/non-interactive sessions can still type menu numbers and field values.
 - Menu translations live in `bbs/translations.json`, separate from the main BBS application code.
 
 Sysop users can administer accounts from the sysop menu:
@@ -82,8 +85,9 @@ Sysop users can administer accounts from the sysop menu:
 - Promote or demote users as sysops.
 - Disable or re-enable users.
 - Delete users.
-- Add or delete local message boards.
-- Delete individual messages from message boards.
+- Publish new bulletins.
+- Add, rename, or delete local message boards.
+- Edit or delete individual messages from message boards.
 - Sysops cannot delete or disable their own account.
 - The BBS prevents removal of the last active sysop.
 
@@ -139,11 +143,16 @@ The private key you pasted is deliberately not written into tracked files. Put i
 
 ## APRS Roadmap
 
-The menu already includes an APRS placeholder. A later implementation can add:
+The APRS menu currently lets each user set `Enable APRS` to `true` or `false`
+through a dialog-style form. The send screen can send APRS messages through
+APRS-IS, calculates the APRS-IS passcode automatically from the caller's
+callsign, and keeps the latest 10 sent APRS messages per user. APRS messaging
+uses the caller's default SSID `-0`.
+
+A later implementation can add:
 
 - APRS-IS connection settings through `.env`
-- Message send/receive queue under `/var/lib/bbs/aprs/`
-- Callsign validation and passcode handling
+- Received message polling under `/var/lib/bbs/aprs/`
 - Local-only dry-run mode for testing
 - A menu screen for inbox, outbox, and station beacons
 
