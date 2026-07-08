@@ -1,0 +1,66 @@
+services:
+  hamnet:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: hamnet-wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+    ports:
+      - "2222:2222/tcp"
+    volumes:
+      - type: bind
+        source: ./hamnet/wg_confs
+        target: /config/wg_confs
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /lib/modules
+        target: /lib/modules
+        read_only: true
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    restart: unless-stopped
+
+  bbs:
+    image: ghcr.io/ea7klk/simple-ham-bbs:latest
+    pull_policy: always
+    container_name: hamnet-bbs
+    network_mode: "service:hamnet"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      - hamnet
+    environment:
+      - BBS_USER_PASSWORD=${BBS_USER_PASSWORD:-change-this-password}
+      - BBS_GUEST_MODE=${BBS_GUEST_MODE:-false}
+      - BBS_NAME=${BBS_NAME:-HAMNET RADIO BBS}
+      - BBS_SYSOP=${BBS_SYSOP:-Sysop}
+      - BBS_SYSOPS=${BBS_SYSOPS:-}
+      - BBS_LOCATION=${BBS_LOCATION:-HamNet}
+      - BBS_WELCOME_TOPIC=${BBS_WELCOME_TOPIC:-Amateur radio notes, local nets, and packet-era experiments}
+      - BBS_DB_FILE=${BBS_DB_FILE:-/var/lib/bbs/bbs.sqlite}
+      - APRS_IS_SERVER=${APRS_IS_SERVER:-rotate.aprs2.net}
+      - APRS_IS_PORT=${APRS_IS_PORT:-14580}
+      - APRSD_BIN=${APRSD_BIN:-/opt/aprsd/bin/aprsd}
+      - APRS_RECEIVER_CALLSIGN=${APRS_RECEIVER_CALLSIGN:-}
+      - BBS_FALLBACK_GATEWAY=${BBS_FALLBACK_GATEWAY:-172.18.0.1}
+    volumes:
+      - type: bind
+        source: ./data/bbs
+        target: /var/lib/bbs
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ./ssh
+        target: /config/ssh
+        read_only: true
+        bind:
+          create_host_path: true
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
