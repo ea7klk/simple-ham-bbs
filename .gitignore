@@ -2,6 +2,7 @@
 data/
 hamnet/wg_confs/
 ssh/authorized_keys
+ssh/host_keys/
 *.log
 __pycache__/
 .DS_Store
