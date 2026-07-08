@@ -58,7 +58,6 @@ services:
       - type: bind
         source: ./ssh
         target: /config/ssh
-        read_only: true
         bind:
           create_host_path: true
     stdin_open: true

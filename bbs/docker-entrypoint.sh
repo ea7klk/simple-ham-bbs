@@ -19,13 +19,27 @@ else
 fi
 
 data_dir="${BBS_DATA_DIR:-/var/lib/bbs}"
-mkdir -p /run/sshd "$data_dir/aprs" /home/bbs/.ssh
+host_key_dir="/config/ssh/host_keys"
+mkdir -p /run/sshd "$data_dir/aprs" /home/bbs/.ssh "$host_key_dir"
 touch "$data_dir/aprs/aprsd.log"
 touch "$data_dir/aprs/receiver.log"
 chown -R bbs:bbs /home/bbs/.ssh
 chown -R bbs:bbs "$data_dir" || echo "Warning: could not change ownership of $data_dir"
 chmod 700 /home/bbs/.ssh
 rm -f "$data_dir/aprs/sent.json"
+
+if [ ! -s "$host_key_dir/ssh_host_rsa_key" ]; then
+  ssh-keygen -q -t rsa -b 4096 -f "$host_key_dir/ssh_host_rsa_key" -N ""
+fi
+if [ ! -s "$host_key_dir/ssh_host_ecdsa_key" ]; then
+  ssh-keygen -q -t ecdsa -f "$host_key_dir/ssh_host_ecdsa_key" -N ""
+fi
+if [ ! -s "$host_key_dir/ssh_host_ed25519_key" ]; then
+  ssh-keygen -q -t ed25519 -f "$host_key_dir/ssh_host_ed25519_key" -N ""
+fi
+chmod 600 "$host_key_dir"/ssh_host_*_key 2>/dev/null || true
+chmod 644 "$host_key_dir"/ssh_host_*_key.pub 2>/dev/null || true
+echo "Using persistent SSH host keys from $host_key_dir."
 
 if command -v ip >/dev/null 2>&1 && ! ip route show default | grep -q '^default '; then
   if ip route add default via "${BBS_FALLBACK_GATEWAY:-172.18.0.1}" dev eth0; then
@@ -50,7 +64,5 @@ if [ -f /config/ssh/authorized_keys ]; then
   chown bbs:bbs /home/bbs/.ssh/authorized_keys
   chmod 600 /home/bbs/.ssh/authorized_keys
 fi
-
-ssh-keygen -A
 
 exec "$@"

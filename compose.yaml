@@ -44,7 +44,7 @@ services:
       - BBS_FALLBACK_GATEWAY=${BBS_FALLBACK_GATEWAY:-172.18.0.1}
     volumes:
       - bbs-data:/var/lib/bbs
-      - ./ssh:/config/ssh:ro
+      - ./ssh:/config/ssh
     stdin_open: true
     tty: true
     restart: unless-stopped
