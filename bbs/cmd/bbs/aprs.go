@@ -76,25 +76,36 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 		if idx < 0 || idx >= len(history) {
 			continue
 		}
-		action := a.showInfoActions(lang, a.t(lang, "aprs_received_message_detail"), a.aprsReceivedDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
-		if action == "d" {
+		action := a.showInfoActions(lang, a.t(lang, "aprs_received_message_detail"), a.aprsReceivedDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"r", a.t(lang, "reply_button")}, {"d", a.t(lang, "delete_button")}})
+		switch action {
+		case "d":
 			_ = a.deleteReceivedRecord(history[idx].ID)
+		case "r":
+			a.sendAPRSForm(callsign, profile, lang, normalizeAPRSCallsign(history[idx].From))
 		}
 	}
 }
 
 func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
 	for {
-		if !profile.EnableAPRS {
-			a.showInfo(lang, a.t(lang, "aprs_send_message"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
+		if !a.sendAPRSForm(callsign, profile, lang, "") {
 			return
 		}
+	}
+}
+
+func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destination string) bool {
+	for {
+		if !profile.EnableAPRS {
+			a.showInfo(lang, a.t(lang, "aprs_send_message"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
+			return false
+		}
 		action, values, ok := a.runForm(lang, a.t(lang, "aprs_send_message"), []formField{
-			{name: "destination", label: a.t(lang, "aprs_destination_callsign"), required: true, limit: 9, normalizer: normalizeAPRSCallsign, validator: validAPRSCallsign, invalidText: a.t(lang, "aprs_invalid_destination")},
+			{name: "destination", label: a.t(lang, "aprs_destination_callsign"), value: destination, required: true, limit: 9, normalizer: normalizeAPRSCallsign, validator: validAPRSCallsign, invalidText: a.t(lang, "aprs_invalid_destination")},
 			{name: "text", label: a.t(lang, "aprs_text"), kind: fieldTextArea, required: true, limit: 2000},
 		}, []string{"send", "cancel"})
 		if !ok || action == "cancel" {
-			return
+			return false
 		}
 		a.showSendingAPRS(lang, values["destination"])
 		sent, okSend := a.sendAPRSMessage(callsign, values["destination"], values["text"], lang)
@@ -111,6 +122,7 @@ func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
 			continue
 		}
 		a.showInfoActions(lang, a.t(lang, "aprs_send_success"), a.aprsSentResultRows(lang, sent), []option{{"o", a.t(lang, "ok_button")}})
+		return true
 	}
 }
 
