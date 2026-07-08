@@ -36,7 +36,10 @@ func (a *app) authenticate() (string, userProfile, error) {
 		password := values["password"]
 		profile, exists := users[callsign]
 		if !exists {
-			profile = a.register(callsign, userProfile{Language: "en"}, true)
+			profile, ok = a.register(callsign, userProfile{Language: "en"}, true)
+			if !ok {
+				return "", userProfile{}, errLoginCancelled
+			}
 			users[callsign] = profile
 			_ = a.saveUsers(users)
 			return callsign, profile, nil
@@ -49,14 +52,20 @@ func (a *app) authenticate() (string, userProfile, error) {
 			return "", userProfile{}, errors.New(a.t(lang, "user_disabled"))
 		}
 		if profile.PasswordHash == "" {
-			profile = a.register(callsign, profile, true)
+			profile, ok = a.register(callsign, profile, true)
+			if !ok {
+				return "", userProfile{}, errLoginCancelled
+			}
 			users[callsign] = profile
 			_ = a.saveUsers(users)
 			return callsign, profile, nil
 		}
 		if verifyPassword(password, profile.PasswordHash) {
 			if !profileComplete(profile) {
-				profile = a.register(callsign, profile, false)
+				profile, ok = a.register(callsign, profile, false)
+				if !ok {
+					return "", userProfile{}, errLoginCancelled
+				}
 			}
 			profile.LastSeen = now()
 			users[callsign] = profile
@@ -71,7 +80,7 @@ func (a *app) authenticate() (string, userProfile, error) {
 	}
 }
 
-func (a *app) register(callsign string, profile userProfile, forcePassword bool) userProfile {
+func (a *app) register(callsign string, profile userProfile, forcePassword bool) (userProfile, bool) {
 	if profile.Language == "" {
 		profile.Language = "en"
 	}
@@ -81,9 +90,9 @@ func (a *app) register(callsign string, profile userProfile, forcePassword bool)
 	profile.IsSysop = profile.IsSysop || a.cfg.sysops[callsign]
 	for {
 		fields := a.profileFields(profile, true, forcePassword || profile.PasswordHash == "")
-		_, values, ok := a.runForm(profile.Language, a.t(profile.Language, "registration_form_title")+" - "+callsign, fields, []string{"save"})
+		_, values, ok := a.runForm(profile.Language, a.t(profile.Language, "registration_form_title")+" - "+callsign, fields, []string{"save", "cancel"})
 		if !ok {
-			continue
+			return profile, false
 		}
 		profile = applyProfileValues(profile, values)
 		if (forcePassword || profile.PasswordHash == "") && values["new_password"] == "" {
@@ -94,7 +103,7 @@ func (a *app) register(callsign string, profile userProfile, forcePassword bool)
 			profile.PasswordHash = hashPassword(values["new_password"])
 		}
 		profile.LastSeen = now()
-		return profile
+		return profile, true
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/crypto/pbkdf2"
+	"gorm.io/gorm"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,27 +17,73 @@ import (
 )
 
 func (a *app) loadUsers() (map[string]userProfile, error) {
+	rows := []dbUser{}
+	err := a.db.Order("callsign").Find(&rows).Error
 	users := map[string]userProfile{}
-	err := readJSON(a.cfg.usersFile, &users, map[string]userProfile{})
-	normalized := map[string]userProfile{}
-	for key, profile := range users {
-		upper := normalizeCallsign(key)
+	for _, row := range rows {
+		upper := normalizeCallsign(row.Callsign)
 		if upper == "" {
 			continue
 		}
-		if existing, ok := normalized[upper]; ok {
-			if existing.PasswordHash == "" && profile.PasswordHash != "" {
-				normalized[upper] = profile
-			}
-		} else {
-			normalized[upper] = profile
+		users[upper] = userProfile{
+			FullName:     row.FullName,
+			Email:        row.Email,
+			Maidenhead:   row.Maidenhead,
+			Language:     row.Language,
+			EnableAPRS:   row.EnableAPRS,
+			QTH:          row.QTH,
+			Rig:          row.Rig,
+			PasswordHash: row.PasswordHash,
+			IsSysop:      row.IsSysop,
+			Disabled:     row.Disabled,
+			FirstSeen:    row.FirstSeen,
+			LastSeen:     row.LastSeen,
 		}
 	}
-	return normalized, err
+	return users, err
 }
 
 func (a *app) saveUsers(users map[string]userProfile) error {
-	return writeJSON(a.cfg.usersFile, users)
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		var existing []dbUser
+		if err := tx.Find(&existing).Error; err != nil {
+			return err
+		}
+		keep := map[string]bool{}
+		for key, profile := range users {
+			callsign := normalizeCallsign(key)
+			if callsign == "" {
+				continue
+			}
+			keep[callsign] = true
+			row := dbUser{
+				Callsign:     callsign,
+				FullName:     profile.FullName,
+				Email:        profile.Email,
+				Maidenhead:   profile.Maidenhead,
+				Language:     profile.Language,
+				EnableAPRS:   profile.EnableAPRS,
+				QTH:          profile.QTH,
+				Rig:          profile.Rig,
+				PasswordHash: profile.PasswordHash,
+				IsSysop:      profile.IsSysop,
+				Disabled:     profile.Disabled,
+				FirstSeen:    profile.FirstSeen,
+				LastSeen:     profile.LastSeen,
+			}
+			if err := tx.Save(&row).Error; err != nil {
+				return err
+			}
+		}
+		for _, row := range existing {
+			if !keep[row.Callsign] {
+				if err := tx.Delete(&dbUser{}, "callsign = ?", row.Callsign).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func (a *app) applyConfiguredSysops(users map[string]userProfile) bool {

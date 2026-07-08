@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"gorm.io/gorm"
 	"regexp"
 	"time"
 )
@@ -10,8 +11,8 @@ const (
 	defaultBoardID              = "general"
 	passwordIterations          = 200000
 	aprsMessageLimit            = 67
-	sentHistoryLimit            = 10
-	receivedHistoryLimit        = 100
+	sentHistoryLimit            = 200
+	receivedHistoryLimit        = 500
 	aprsReceiverRestartInterval = time.Hour
 	screenWidth                 = 80
 	screenHeight                = 24
@@ -45,6 +46,7 @@ var (
 
 type config struct {
 	dataDir              string
+	dbFile               string
 	usersFile            string
 	messagesFile         string
 	bulletinsFile        string
@@ -67,6 +69,7 @@ type config struct {
 type app struct {
 	cfg  config
 	text map[string]map[string]any
+	db   *gorm.DB
 }
 
 type userProfile struct {
@@ -113,6 +116,7 @@ type boardsData struct {
 }
 
 type sentAPRS struct {
+	ID       uint           `json:"id,omitempty"`
 	At       string         `json:"at"`
 	From     string         `json:"from"`
 	To       string         `json:"to"`
@@ -130,6 +134,7 @@ type sentAPRSPart struct {
 }
 
 type receivedAPRS struct {
+	ID   uint   `json:"id,omitempty"`
 	At   string `json:"at"`
 	From string `json:"from"`
 	To   string `json:"to"`

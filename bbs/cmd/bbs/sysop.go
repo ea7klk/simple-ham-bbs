@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -11,53 +12,49 @@ func (a *app) sysopMenu(callsign, lang string) {
 		choice := a.runMenu(lang, a.t(lang, "sysop_menu_title"), "", []option{
 			{"1", a.t(lang, "sysop_list_users")},
 			{"2", a.t(lang, "sysop_toggle_sysop")},
-			{"3", a.t(lang, "sysop_toggle_disabled")},
-			{"4", a.t(lang, "sysop_delete_user")},
-			{"5", a.t(lang, "sysop_publish_bulletin")},
-			{"6", a.t(lang, "sysop_edit_bulletin")},
-			{"7", a.t(lang, "sysop_add_board")},
-			{"8", a.t(lang, "sysop_delete_board")},
-			{"9", a.t(lang, "sysop_rename_board")},
-			{"10", a.t(lang, "sysop_delete_message")},
+			{"3", a.t(lang, "sysop_publish_bulletin")},
+			{"4", a.t(lang, "sysop_edit_bulletin")},
+			{"5", a.t(lang, "sysop_add_board")},
+			{"6", a.t(lang, "sysop_delete_board")},
+			{"7", a.t(lang, "sysop_rename_board")},
+			{"8", a.t(lang, "sysop_delete_message")},
 			{"q", a.t(lang, "menu_quit")},
 		})
 		switch choice {
 		case "1":
-			rows := [][]string{}
-			for _, key := range sortedKeys(users) {
-				p := users[key]
-				role := a.t(lang, "user_role")
-				if a.isSysop(key, p) {
-					role = a.t(lang, "sysop_role")
-				}
-				status := a.t(lang, "enabled")
-				if p.Disabled {
-					status = a.t(lang, "disabled")
-				}
-				rows = append(rows, []string{key, status + " / " + role + " / " + p.FullName + " / " + p.Email})
-			}
-			a.showInfo(lang, a.t(lang, "sysop_list_users"), rows)
+			a.listUsers(callsign, lang, users)
 		case "2":
 			a.toggleSysop(callsign, lang, users)
 		case "3":
-			a.toggleDisabled(callsign, lang, users)
-		case "4":
-			a.deleteUser(callsign, lang, users)
-		case "5":
 			a.publishBulletin(callsign, lang)
-		case "6":
+		case "4":
 			a.editBulletin(callsign, lang)
-		case "7":
+		case "5":
 			a.addBoard(lang)
-		case "8":
+		case "6":
 			a.deleteBoard(lang)
-		case "9":
+		case "7":
 			a.renameBoard(lang)
-		case "10":
+		case "8":
 			a.editBoardMessage(lang)
 		case "q":
 			return
 		}
+	}
+}
+
+func (a *app) listUsers(current, lang string, users map[string]userProfile) {
+	for {
+		target, ok := a.chooseUser(lang, users, "")
+		if !ok {
+			return
+		}
+		a.editUserDetail(current, lang, users, target)
+		refreshed, err := a.loadUsers()
+		if err != nil {
+			return
+		}
+		users = refreshed
 	}
 }
 
@@ -69,7 +66,16 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 		if key == current {
 			continue
 		}
-		opts = append(opts, option{strconv.Itoa(i), key + " - " + users[key].FullName})
+		p := users[key]
+		role := a.t(lang, "user_role")
+		if a.isSysop(key, p) {
+			role = a.t(lang, "sysop_role")
+		}
+		status := a.t(lang, "enabled")
+		if p.Disabled {
+			status = a.t(lang, "disabled")
+		}
+		opts = append(opts, option{strconv.Itoa(i), key + " - " + status + " / " + role + " / " + p.FullName})
 		i++
 	}
 	opts = append(opts, option{"q", a.t(lang, "menu_quit")})
@@ -82,6 +88,108 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 		return "", false
 	}
 	return strings.SplitN(opts[idx-1].label, " - ", 2)[0], true
+}
+
+func (a *app) editUserDetail(current, lang string, users map[string]userProfile, target string) {
+	profile, ok := users[target]
+	if !ok {
+		a.showInfo(lang, a.t(lang, "user_not_found"), [][]string{{target}})
+		return
+	}
+	action, values, ok := a.runForm(lang, a.t(lang, "user_detail_title")+" - "+target, a.userDetailFields(lang, profile), []string{"cancel", "save", "delete"})
+	if action == "delete" {
+		a.confirmAndDeleteUser(current, lang, users, target)
+		return
+	}
+	if !ok || action == "cancel" {
+		return
+	}
+	updated := applyProfileValues(profile, values)
+	updated.Disabled = values["account_status"] == "disabled"
+	if target == current && !profile.Disabled && updated.Disabled {
+		a.showInfo(lang, a.t(lang, "cannot_manage_self"), [][]string{{target}})
+		return
+	}
+	if updated.Disabled && a.wouldRemoveLastSysopWithProfile(users, target, updated) {
+		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
+		return
+	}
+	users[target] = updated
+	_ = a.saveUsers(users)
+	a.showInfo(lang, a.t(lang, "user_updated"), userDetailRows(a, lang, target, updated, a.isSysop(target, updated)))
+}
+
+func (a *app) userDetailFields(lang string, profile userProfile) []formField {
+	profileLang := profile.Language
+	if profileLang == "" {
+		profileLang = "en"
+	}
+	status := "enabled"
+	if profile.Disabled {
+		status = "disabled"
+	}
+	return []formField{
+		{name: "full_name", label: a.t(lang, "full_name"), value: profile.FullName, required: true, limit: 100},
+		{name: "email", label: a.t(lang, "email"), value: profile.Email, required: true, limit: 120, validator: func(v string) bool { return emailRE.MatchString(v) }, invalidText: a.t(lang, "invalid_email")},
+		{name: "maidenhead", label: a.t(lang, "maidenhead"), value: profile.Maidenhead, limit: 10, normalizer: normalizeLocator, validator: func(v string) bool { return v == "" || maidenheadRE.MatchString(v) }, invalidText: a.t(lang, "invalid_locator")},
+		{name: "language", label: a.t(lang, "language"), kind: fieldChoice, value: profileLang, required: true, choices: languageOptions()},
+		{name: "enable_aprs", label: a.t(lang, "enable_aprs"), kind: fieldChoice, value: boolString(profile.EnableAPRS), choices: []option{{"false", "false"}, {"true", "true"}}},
+		{name: "account_status", label: a.t(lang, "account_status"), kind: fieldChoice, value: status, choices: []option{{"enabled", a.t(lang, "enabled")}, {"disabled", a.t(lang, "disabled")}}},
+		{name: "qth", label: a.t(lang, "qth"), value: profile.QTH, limit: 80},
+		{name: "rig", label: a.t(lang, "rig"), value: profile.Rig, limit: 100},
+	}
+}
+
+func userDetailRows(a *app, lang, callsign string, profile userProfile, isSysop bool) [][]string {
+	role := a.t(lang, "user_role")
+	if isSysop {
+		role = a.t(lang, "sysop_role")
+	}
+	status := a.t(lang, "enabled")
+	if profile.Disabled {
+		status = a.t(lang, "disabled")
+	}
+	rows := [][]string{{a.t(lang, "target_callsign"), callsign}, {a.t(lang, "account_status"), status}, {a.t(lang, "sysop"), role}}
+	rows = append(rows, profileRows(a, lang, profile)...)
+	return rows
+}
+
+func (a *app) confirmAndDeleteUser(current, lang string, users map[string]userProfile, target string) {
+	if target == current {
+		a.showInfo(lang, a.t(lang, "cannot_manage_self"), [][]string{{target}})
+		return
+	}
+	if a.wouldRemoveLastSysop(users, target) {
+		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
+		return
+	}
+	action, _, ok := a.runForm(lang, fmt.Sprintf(a.t(lang, "confirm_delete_user"), target), nil, []string{"no", "yes"})
+	if !ok || action != "yes" {
+		return
+	}
+	delete(users, target)
+	_ = a.saveUsers(users)
+	a.showInfo(lang, a.t(lang, "user_deleted"), [][]string{{target}})
+}
+
+func (a *app) wouldRemoveLastSysopWithProfile(users map[string]userProfile, callsign string, profile userProfile) bool {
+	current, ok := users[callsign]
+	if !ok || !a.isSysop(callsign, current) || current.Disabled {
+		return false
+	}
+	if a.isSysop(callsign, profile) && !profile.Disabled {
+		return false
+	}
+	count := 0
+	for key, value := range users {
+		if key == callsign {
+			continue
+		}
+		if a.isSysop(key, value) && !value.Disabled {
+			count++
+		}
+	}
+	return count == 0
 }
 
 func (a *app) toggleSysop(current, lang string, users map[string]userProfile) {
@@ -103,34 +211,6 @@ func (a *app) toggleSysop(current, lang string, users map[string]userProfile) {
 		p.Disabled = false
 	}
 	users[target] = p
-	_ = a.saveUsers(users)
-}
-
-func (a *app) toggleDisabled(current, lang string, users map[string]userProfile) {
-	target, ok := a.chooseUser(lang, users, current)
-	if !ok {
-		return
-	}
-	p := users[target]
-	if !p.Disabled && a.wouldRemoveLastSysop(users, target) {
-		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
-		return
-	}
-	p.Disabled = !p.Disabled
-	users[target] = p
-	_ = a.saveUsers(users)
-}
-
-func (a *app) deleteUser(current, lang string, users map[string]userProfile) {
-	target, ok := a.chooseUser(lang, users, current)
-	if !ok {
-		return
-	}
-	if a.wouldRemoveLastSysop(users, target) {
-		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
-		return
-	}
-	delete(users, target)
 	_ = a.saveUsers(users)
 }
 

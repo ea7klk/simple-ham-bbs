@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -22,13 +24,20 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 	for {
 		header := fmt.Sprintf("%s: %s\n%s", a.t(lang, "aprs_status"), boolString(profile.EnableAPRS), a.t(lang, "aprs_ssid_info"))
 		choice := a.runMenu(lang, a.t(lang, "menu_aprs"), header, []option{
-			{"1", a.t(lang, "aprs_set_enabled")},
-			{"2", a.t(lang, "aprs_received_messages")},
+			{"1", a.t(lang, "aprs_received_messages")},
+			{"2", a.t(lang, "aprs_sent_messages")},
 			{"3", a.t(lang, "aprs_send_message")},
+			{"4", a.t(lang, "aprs_set_enabled")},
 			{"q", a.t(lang, "menu_quit")},
 		})
 		switch choice {
 		case "1":
+			a.showReceivedAPRS(callsign, profile, lang)
+		case "2":
+			a.showSentAPRS(callsign, profile, lang)
+		case "3":
+			a.sendAPRS(callsign, profile, lang)
+		case "4":
 			_, values, ok := a.runForm(lang, a.t(lang, "aprs_enable_title"), []formField{{name: "enable_aprs", label: a.t(lang, "enable_aprs"), kind: fieldChoice, value: boolString(profile.EnableAPRS), choices: []option{{"false", "false"}, {"true", "true"}}}}, []string{"save", "cancel"})
 			if ok {
 				profile.EnableAPRS = values["enable_aprs"] == "true"
@@ -36,10 +45,6 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 				users[callsign] = profile
 				_ = a.saveUsers(users)
 			}
-		case "2":
-			a.showReceivedAPRS(callsign, profile, lang)
-		case "3":
-			a.sendAPRS(callsign, profile, lang)
 		case "q":
 			return profile
 		}
@@ -47,24 +52,41 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 }
 
 func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string) {
-	history := a.trimReceived(callsign)
-	rows := a.aprsReceivedRows(lang, profile.EnableAPRS, history)
-	if !profile.EnableAPRS {
-		rows = append(rows, []string{a.t(lang, "aprs_enable_required")})
+	for {
+		history := reverseReceived(a.trimReceived(callsign))
+		if !profile.EnableAPRS {
+			a.showInfo(lang, a.t(lang, "aprs_received_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
+			return
+		}
+		if len(history) == 0 {
+			a.showInfoActions(lang, a.t(lang, "aprs_received_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_no_received_messages")}}, []option{{"q", a.t(lang, "back_button")}})
+			return
+		}
+		opts := []option{}
+		for i, item := range history {
+			opts = append(opts, option{strconv.Itoa(i + 1), a.receivedAPRSListLabel(item)})
+		}
+		opts = append(opts, option{"q", a.t(lang, "back_button")})
+		choice := a.runMenu(lang, a.t(lang, "aprs_received_messages"), a.t(lang, "aprs_latest_received"), opts)
+		if choice == "q" {
+			return
+		}
+		idx, _ := strconv.Atoi(choice)
+		idx--
+		if idx < 0 || idx >= len(history) {
+			continue
+		}
+		action := a.showInfoActions(lang, a.t(lang, "aprs_received_message_detail"), a.aprsReceivedDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
+		if action == "d" {
+			_ = a.deleteReceivedRecord(history[idx].ID)
+		}
 	}
-	a.showInfoActions(lang, a.t(lang, "aprs_received_messages"), rows, []option{{"q", a.t(lang, "back_button")}})
 }
 
 func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
-	history := a.trimSent(callsign)
 	for {
-		rows := a.aprsSentRows(lang, profile.EnableAPRS, history)
 		if !profile.EnableAPRS {
-			a.showInfo(lang, a.t(lang, "aprs_send_message"), append(rows, []string{a.t(lang, "aprs_enable_required")}))
-			return
-		}
-		action := a.showInfoActions(lang, a.t(lang, "aprs_send_message"), rows, []option{{"s", a.t(lang, "send_button")}, {"q", a.t(lang, "back_button")}})
-		if action != "s" {
+			a.showInfo(lang, a.t(lang, "aprs_send_message"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return
 		}
 		action, values, ok := a.runForm(lang, a.t(lang, "aprs_send_message"), []formField{
@@ -72,11 +94,11 @@ func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
 			{name: "text", label: a.t(lang, "aprs_text"), kind: fieldTextArea, required: true, limit: 2000},
 		}, []string{"send", "cancel"})
 		if !ok || action == "cancel" {
-			continue
+			return
 		}
 		a.showSendingAPRS(lang, values["destination"])
 		sent, okSend := a.sendAPRSMessage(callsign, values["destination"], values["text"], lang)
-		history = a.addSent(callsign, sent)
+		_ = a.addSent(callsign, sent)
 		if !okSend {
 			detail := ""
 			if len(sent.Parts) > 0 {
@@ -89,6 +111,38 @@ func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
 			continue
 		}
 		a.showInfoActions(lang, a.t(lang, "aprs_send_success"), a.aprsSentResultRows(lang, sent), []option{{"o", a.t(lang, "ok_button")}})
+	}
+}
+
+func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
+	for {
+		history := reverseSent(a.trimSent(callsign))
+		if !profile.EnableAPRS {
+			a.showInfo(lang, a.t(lang, "aprs_sent_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
+			return
+		}
+		if len(history) == 0 {
+			a.showInfoActions(lang, a.t(lang, "aprs_sent_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_no_sent_messages")}}, []option{{"q", a.t(lang, "back_button")}})
+			return
+		}
+		opts := []option{}
+		for i, item := range history {
+			opts = append(opts, option{strconv.Itoa(i + 1), a.sentAPRSListLabel(item)})
+		}
+		opts = append(opts, option{"q", a.t(lang, "back_button")})
+		choice := a.runMenu(lang, a.t(lang, "aprs_sent_messages"), a.t(lang, "aprs_latest_sent"), opts)
+		if choice == "q" {
+			return
+		}
+		idx, _ := strconv.Atoi(choice)
+		idx--
+		if idx < 0 || idx >= len(history) {
+			continue
+		}
+		action := a.showInfoActions(lang, a.t(lang, "aprs_sent_message_detail"), a.aprsSentDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
+		if action == "d" {
+			_ = a.deleteSentRecord(history[idx].ID)
+		}
 	}
 }
 
@@ -115,12 +169,20 @@ func (a *app) aprsReceivedRows(lang string, enabled bool, history []receivedAPRS
 }
 
 func (a *app) receivedAPRSSummary(item receivedAPRS) string {
-	return fmt.Sprintf("%s -> %s / %s", item.From, item.To, stripAPRSMessageID(item.Text))
+	return fmt.Sprintf("%s -> %s / %s", item.From, item.To, singleLineAPRSDetail(stripAPRSMessageID(item.Text)))
+}
+
+func (a *app) receivedAPRSListLabel(item receivedAPRS) string {
+	return fmt.Sprintf("%-9s  %-17s  %s", item.From, item.At, truncateText(singleLineAPRSDetail(stripAPRSMessageID(item.Text)), 34))
 }
 
 func (a *app) sentAPRSSummary(lang string, item sentAPRS) string {
 	status := a.aprsStatusLabel(lang, item.Status)
-	return fmt.Sprintf("%s -> %s / %s / %d %s / %s", item.From, item.To, status, len(item.Parts), a.t(lang, "aprs_parts"), item.Text)
+	return fmt.Sprintf("%s -> %s / %s / %d %s / %s", item.From, item.To, status, len(item.Parts), a.t(lang, "aprs_parts"), singleLineAPRSDetail(item.Text))
+}
+
+func (a *app) sentAPRSListLabel(item sentAPRS) string {
+	return fmt.Sprintf("%-9s  %-17s  %s", item.To, item.At, truncateText(singleLineAPRSDetail(item.Text), 34))
 }
 
 func (a *app) aprsSentResultRows(lang string, item sentAPRS) [][]string {
@@ -130,9 +192,49 @@ func (a *app) aprsSentResultRows(lang string, item sentAPRS) [][]string {
 		{a.t(lang, "aprs_parts"), fmt.Sprintf("%d", len(item.Parts))},
 	}
 	for _, part := range item.Parts {
-		rows = append(rows, []string{fmt.Sprintf("%d", part.Number), a.aprsStatusLabel(lang, part.Status) + " / " + part.Text})
+		rows = append(rows, []string{fmt.Sprintf("%d", part.Number), a.aprsStatusLabel(lang, part.Status) + " / " + singleLineAPRSDetail(part.Text)})
 	}
 	return rows
+}
+
+func (a *app) aprsSentDetailRows(lang string, item sentAPRS) [][]string {
+	partStatuses := []string{}
+	for _, part := range item.Parts {
+		status := fmt.Sprintf("%d:%s", part.Number, a.aprsStatusLabel(lang, part.Status))
+		if part.Detail != "" {
+			status += " (" + part.Detail + ")"
+		}
+		partStatuses = append(partStatuses, status)
+	}
+	rows := [][]string{
+		{a.t(lang, "from"), item.From},
+		{a.t(lang, "aprs_destination_callsign"), item.To},
+		{a.t(lang, "at"), item.At},
+		{a.t(lang, "status"), a.aprsStatusLabel(lang, item.Status)},
+		{a.t(lang, "aprs_parts"), fmt.Sprintf("%d", len(item.Parts))},
+		{a.t(lang, "aprs_text"), singleLineAPRSDetail(item.Text)},
+	}
+	if len(partStatuses) > 0 {
+		rows = append(rows, []string{a.t(lang, "aprs_part_statuses"), strings.Join(partStatuses, "  ")})
+	}
+	return rows
+}
+
+func (a *app) aprsReceivedDetailRows(lang string, item receivedAPRS) [][]string {
+	rows := [][]string{
+		{a.t(lang, "from"), item.From},
+		{a.t(lang, "aprs_destination_callsign"), item.To},
+		{a.t(lang, "at"), item.At},
+		{a.t(lang, "aprs_text"), singleLineAPRSDetail(stripAPRSMessageID(item.Text))},
+	}
+	if item.Raw != "" {
+		rows = append(rows, []string{a.t(lang, "aprs_raw_packet"), singleLineAPRSDetail(item.Raw)})
+	}
+	return rows
+}
+
+func singleLineAPRSDetail(text string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
 }
 
 func (a *app) showSendingAPRS(lang, destination string) {
@@ -145,51 +247,173 @@ func (a *app) showSendingAPRS(lang, destination string) {
 }
 
 func (a *app) trimSent(callsign string) []sentAPRS {
-	all := map[string][]sentAPRS{}
-	_ = readJSON(a.cfg.aprsSentFile, &all, map[string][]sentAPRS{})
 	key := normalizeCallsign(callsign)
-	history := all[key]
-	for i := range history {
-		history[i].Status = normalizeAPRSStatus(history[i].Status)
-		for j := range history[i].Parts {
-			history[i].Parts[j].Status = normalizeAPRSStatus(history[i].Parts[j].Status)
-		}
-	}
-	if len(history) > sentHistoryLimit {
-		history = history[len(history)-sentHistoryLimit:]
-	}
-	all[key] = history
-	_ = writeJSON(a.cfg.aprsSentFile, all)
-	return history
+	_ = a.trimSentRows(key)
+	return a.loadSentHistory(key)
 }
 
 func (a *app) trimReceived(callsign string) []receivedAPRS {
-	all := map[string][]receivedAPRS{}
-	_ = readJSON(a.cfg.aprsReceivedFile, &all, map[string][]receivedAPRS{})
 	key := normalizeCallsign(callsign)
-	history := all[key]
-	for i := range history {
-		history[i].Text = stripAPRSMessageID(history[i].Text)
-	}
-	if len(history) > receivedHistoryLimit {
-		history = history[len(history)-receivedHistoryLimit:]
-	}
-	all[key] = history
-	_ = writeJSON(a.cfg.aprsReceivedFile, all)
-	return history
+	_ = a.trimReceivedRows(key)
+	return a.loadReceivedHistory(key)
 }
 
 func (a *app) addSent(callsign string, sent sentAPRS) []sentAPRS {
-	all := map[string][]sentAPRS{}
-	_ = readJSON(a.cfg.aprsSentFile, &all, map[string][]sentAPRS{})
-	key := normalizeCallsign(callsign)
-	history := append(all[key], sent)
-	if len(history) > sentHistoryLimit {
-		history = history[len(history)-sentHistoryLimit:]
+	history, err := a.addSentRecord(normalizeCallsign(callsign), sent)
+	if err != nil {
+		return a.trimSent(callsign)
 	}
-	all[key] = history
-	_ = writeJSON(a.cfg.aprsSentFile, all)
 	return history
+}
+
+func (a *app) loadSentHistory(callsign string) []sentAPRS {
+	rows := []dbAPRSSent{}
+	if err := a.db.Preload("Parts", func(db *gorm.DB) *gorm.DB { return db.Order("number") }).Where("user_callsign = ?", normalizeCallsign(callsign)).Order("position, id").Find(&rows).Error; err != nil {
+		return nil
+	}
+	out := make([]sentAPRS, 0, len(rows))
+	for _, row := range rows {
+		item := sentAPRS{ID: row.ID, At: row.At, From: row.From, To: row.To, Text: singleLineAPRSDetail(row.Text), Status: normalizeAPRSStatus(row.Status), Passcode: row.Passcode}
+		for _, part := range row.Parts {
+			item.Parts = append(item.Parts, sentAPRSPart{Number: part.Number, Text: singleLineAPRSDetail(part.Text), Status: normalizeAPRSStatus(part.Status), Detail: singleLineAPRSDetail(part.Detail)})
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func (a *app) deleteSentRecord(id uint) error {
+	if id == 0 {
+		return nil
+	}
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&dbAPRSSentPart{}, "sent_id = ?", id).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&dbAPRSSent{}, id).Error
+	})
+}
+
+func (a *app) addSentRecord(callsign string, sent sentAPRS) ([]sentAPRS, error) {
+	callsign = normalizeCallsign(callsign)
+	sent.Text = singleLineAPRSDetail(sent.Text)
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var maxPos int
+		_ = tx.Model(&dbAPRSSent{}).Where("user_callsign = ?", callsign).Select("COALESCE(MAX(position), -1)").Scan(&maxPos).Error
+		row := dbAPRSSent{UserCallsign: callsign, Position: maxPos + 1, At: sent.At, From: sent.From, To: sent.To, Text: sent.Text, Status: normalizeAPRSStatus(sent.Status), Passcode: sent.Passcode}
+		if row.At == "" {
+			row.At = now()
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		for i, part := range sent.Parts {
+			number := part.Number
+			if number == 0 {
+				number = i + 1
+			}
+			if err := tx.Create(&dbAPRSSentPart{SentID: row.ID, Number: number, Text: singleLineAPRSDetail(part.Text), Status: normalizeAPRSStatus(part.Status), Detail: singleLineAPRSDetail(part.Detail)}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := a.trimSentRows(callsign); err != nil {
+		return nil, err
+	}
+	return a.loadSentHistory(callsign), nil
+}
+
+func (a *app) trimSentRows(callsign string) error {
+	var rows []dbAPRSSent
+	if err := a.db.Where("user_callsign = ?", normalizeCallsign(callsign)).Order("position DESC, id DESC").Find(&rows).Error; err != nil {
+		return err
+	}
+	for i, row := range rows {
+		if i >= sentHistoryLimit {
+			if err := a.db.Delete(&dbAPRSSentPart{}, "sent_id = ?", row.ID).Error; err != nil {
+				return err
+			}
+			if err := a.db.Delete(&dbAPRSSent{}, row.ID).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *app) loadReceivedHistory(callsign string) []receivedAPRS {
+	rows := []dbAPRSReceived{}
+	if err := a.db.Where("user_callsign = ?", normalizeCallsign(callsign)).Order("position, id").Find(&rows).Error; err != nil {
+		return nil
+	}
+	out := make([]receivedAPRS, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, receivedAPRS{ID: row.ID, At: row.At, From: row.From, To: row.To, Text: singleLineAPRSDetail(stripAPRSMessageID(row.Text)), Raw: row.Raw})
+	}
+	return out
+}
+
+func (a *app) deleteReceivedRecord(id uint) error {
+	if id == 0 {
+		return nil
+	}
+	return a.db.Delete(&dbAPRSReceived{}, id).Error
+}
+
+func (a *app) addReceivedRecord(callsign string, msg receivedAPRS) ([]receivedAPRS, error) {
+	callsign = normalizeCallsign(callsign)
+	msg.Text = singleLineAPRSDetail(stripAPRSMessageID(msg.Text))
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if msg.Raw != "" {
+			var count int64
+			if err := tx.Model(&dbAPRSReceived{}).Where("user_callsign = ? AND raw = ?", callsign, msg.Raw).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return nil
+			}
+		}
+		var maxPos int
+		_ = tx.Model(&dbAPRSReceived{}).Where("user_callsign = ?", callsign).Select("COALESCE(MAX(position), -1)").Scan(&maxPos).Error
+		row := dbAPRSReceived{UserCallsign: callsign, Position: maxPos + 1, At: msg.At, From: msg.From, To: msg.To, Text: msg.Text, Raw: msg.Raw}
+		if row.At == "" {
+			row.At = now()
+		}
+		return tx.Create(&row).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := a.trimReceivedRows(callsign); err != nil {
+		return nil, err
+	}
+	return a.loadReceivedHistory(callsign), nil
+}
+
+func (a *app) trimReceivedRows(callsign string) error {
+	callsign = normalizeCallsign(callsign)
+	rows := []dbAPRSReceived{}
+	if err := a.db.Where("user_callsign = ?", callsign).Order("position DESC, id DESC").Find(&rows).Error; err != nil {
+		return err
+	}
+	for i, row := range rows {
+		cleaned := singleLineAPRSDetail(stripAPRSMessageID(row.Text))
+		if cleaned != row.Text {
+			if err := a.db.Model(&dbAPRSReceived{}).Where("id = ?", row.ID).Update("text", cleaned).Error; err != nil {
+				return err
+			}
+		}
+		if i >= receivedHistoryLimit {
+			if err := a.db.Delete(&dbAPRSReceived{}, row.ID).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (a *app) sendAPRSMessage(source, destination, text, lang string) (sentAPRS, bool) {

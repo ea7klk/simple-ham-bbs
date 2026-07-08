@@ -16,7 +16,7 @@ This project uses OpenSSH as the transport and a small Go BBS application as the
 - `bbs/go.mod` declares the Charm terminal UI dependencies.
 - `hamnet/wg0.conf.example` contains a safe, redacted WireGuard example.
 - `hamnet/wg_confs/` is ignored by git and should contain the real WireGuard config.
-- `bbs-data` is the Docker named volume that stores users/messages/bulletins.
+- `bbs-data` is the Docker named volume that stores the SQLite database and logs.
 - `ssh/authorized_keys` is optional and ignored by git.
 
 ## Quick Start
@@ -151,9 +151,18 @@ calculates the APRS-IS passcode automatically, and asks `aprsd` to send the
 message. Messages longer than the APRS message body limit are split into
 numbered parts before sending.
 
-The latest 10 sent APRS messages per user are stored in
-`/var/lib/bbs/aprs/sent-aprsd.json`. The old direct-sender store
-`/var/lib/bbs/aprs/sent.json` is removed on startup.
+Users, bulletins, local boards, threaded messages, and APRS history are stored
+in SQLite through GORM. The default database path is:
+
+```sh
+/var/lib/bbs/bbs.sqlite
+```
+
+On startup, existing JSON data files under `/var/lib/bbs` are imported into the
+database once. The old direct-sender APRS store `/var/lib/bbs/aprs/sent.json`
+is removed on startup.
+
+The latest 10 sent APRS messages per user are retained in the database.
 
 The container also starts a persistent APRS receiver process:
 
@@ -163,9 +172,8 @@ The container also starts a persistent APRS receiver process:
 
 It connects to APRS-IS with `filter t/m`, listens for APRS message packets, and
 stores messages addressed to BBS users who have `Enable APRS` set to `true`.
-Received messages are stored per callsign in
-`/var/lib/bbs/aprs/received.json` and are shown under `Received APRS messages`
-in the APRS menu. APRS message IDs appended by senders, such as `{2044`, are
+Received messages are stored per callsign in the database and are shown under
+`Received APRS messages` in the APRS menu. APRS message IDs appended by senders, such as `{2044`, are
 removed from the user-facing message text before storage/display, while the raw
 packet field is preserved as received. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
 receive-only APRS-IS login callsign; if it is empty, the receiver uses the

@@ -6,7 +6,7 @@ set -euo pipefail
 
 mkdir -p /etc/bbs
 {
-  for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRSD_BIN APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY; do
+  for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_DB_FILE BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRSD_BIN APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY; do
     printf '%s=%q\n' "$name" "${!name:-}"
   done
 } > /etc/bbs/bbs.env
@@ -43,7 +43,7 @@ fi
   done
 ) &
 
-tail -n 0 -F "$data_dir/aprs/aprsd.log" "$data_dir/aprs/receiver.log" &
+tail -n 0 -f "$data_dir/aprs/aprsd.log" "$data_dir/aprs/receiver.log" &
 
 if [ -f /config/ssh/authorized_keys ]; then
   cp /config/ssh/authorized_keys /home/bbs/.ssh/authorized_keys

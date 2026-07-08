@@ -82,6 +82,10 @@ func buttonLabelKey(button string) string {
 		return "reply_button"
 	case "send":
 		return "send_button"
+	case "no":
+		return "no_label"
+	case "yes":
+		return "yes_label"
 	default:
 		return "cancel_button"
 	}

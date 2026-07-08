@@ -1,10 +1,21 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func testApp(t *testing.T) *app {
+	t.Helper()
+	dir := t.TempDir()
+	db, err := openDatabase(filepath.Join(dir, "bbs.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &app{cfg: config{dataDir: dir, dbFile: filepath.Join(dir, "bbs.sqlite")}, db: db, text: map[string]map[string]any{"en": {}}}
+}
 
 func TestAPRSPasscode(t *testing.T) {
 	if got, want := aprsPasscode("EA7KLK-0"), 19875; got != want {
@@ -58,13 +69,63 @@ func TestParseAPRSMessageLineRejectsPosition(t *testing.T) {
 	}
 }
 
+func TestParseAPRSMessageLineRejectsAckAndRej(t *testing.T) {
+	cases := []string{
+		"EA1ABC-7>APRS,TCPIP*,qAC,T2TEST::EA7KLK-0 :ack42",
+		"EA1ABC-7>APRS,TCPIP*,qAC,T2TEST::EA7KLK-0 :rej42",
+		"EA1ABC-7>APRS,TCPIP*,qAC,T2TEST::EA7KLK-0 :ack42{99",
+	}
+	for _, raw := range cases {
+		if _, ok := parseAPRSMessageLine(raw); ok {
+			t.Fatalf("parseAPRSMessageLine() accepted APRS response packet %q", raw)
+		}
+	}
+	msg, ok := parseAPRSMessageLine("EA1ABC-7>APRS,TCPIP*,qAC,T2TEST::EA7KLK-0 :acknowledged and copied")
+	if !ok || msg.Text != "acknowledged and copied" {
+		t.Fatalf("parseAPRSMessageLine() rejected a normal text message: %#v ok=%v", msg, ok)
+	}
+}
+
+func TestParseAPRSMultipartPrefix(t *testing.T) {
+	part, total, body, ok := parseAPRSMultipartPrefix("[2/3] middle text")
+	if !ok || part != 2 || total != 3 || body != "middle text" {
+		t.Fatalf("parseAPRSMultipartPrefix() = part=%d total=%d body=%q ok=%v", part, total, body, ok)
+	}
+	if _, _, _, ok := parseAPRSMultipartPrefix("not multipart"); ok {
+		t.Fatal("parseAPRSMultipartPrefix() accepted a normal message")
+	}
+}
+
+func TestCollectAPRSMessagePartReassemblesOutOfOrder(t *testing.T) {
+	buffers := map[string]*aprsMultipartBuffer{}
+	second := receivedAPRS{At: "2026-07-08 10:00 UTC", From: "EA1ABC-7", To: "EA7KLK-0", Text: "[2/3] two ", Raw: "raw2"}
+	first := receivedAPRS{At: "2026-07-08 09:59 UTC", From: "EA1ABC-7", To: "EA7KLK-0", Text: "[1/3] one ", Raw: "raw1"}
+	third := receivedAPRS{At: "2026-07-08 10:01 UTC", From: "EA1ABC-7", To: "EA7KLK-0", Text: "[3/3] three", Raw: "raw3"}
+
+	if ready, waiting := collectAPRSMessagePart(buffers, second); !waiting || len(ready) != 0 {
+		t.Fatalf("second part ready=%d waiting=%v, want waiting", len(ready), waiting)
+	}
+	if ready, waiting := collectAPRSMessagePart(buffers, first); !waiting || len(ready) != 0 {
+		t.Fatalf("first part ready=%d waiting=%v, want waiting", len(ready), waiting)
+	}
+	ready, waiting := collectAPRSMessagePart(buffers, third)
+	if waiting || len(ready) != 1 {
+		t.Fatalf("third part ready=%d waiting=%v, want one complete message", len(ready), waiting)
+	}
+	got := ready[0]
+	if got.Text != "one two three" {
+		t.Fatalf("reassembled text = %q, want %q", got.Text, "one two three")
+	}
+	if got.Raw != "raw1\nraw2\nraw3" {
+		t.Fatalf("reassembled raw = %q", got.Raw)
+	}
+	if len(buffers) != 0 {
+		t.Fatalf("buffers still has %d entries, want 0", len(buffers))
+	}
+}
+
 func TestStoreReceivedAPRSOnlyEnabledUsers(t *testing.T) {
-	dir := t.TempDir()
-	a := &app{cfg: config{
-		dataDir:          dir,
-		usersFile:        filepath.Join(dir, "users.json"),
-		aprsReceivedFile: filepath.Join(dir, "aprs", "received.json"),
-	}}
+	a := testApp(t)
 	users := map[string]userProfile{
 		"EA7KLK": {EnableAPRS: true},
 		"EA1OFF": {EnableAPRS: false},
@@ -80,41 +141,172 @@ func TestStoreReceivedAPRSOnlyEnabledUsers(t *testing.T) {
 	if err != nil || saved {
 		t.Fatalf("storeReceivedAPRS(disabled) saved=%v err=%v", saved, err)
 	}
-	all := map[string][]receivedAPRS{}
-	if err := readJSON(a.cfg.aprsReceivedFile, &all, map[string][]receivedAPRS{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(all["EA7KLK"]); got != 1 {
+	history := a.loadReceivedHistory("EA7KLK")
+	if got := len(history); got != 1 {
 		t.Fatalf("stored enabled message count = %d, want 1", got)
 	}
-	if got := all["EA7KLK"][0].Text; got != "Enabled" {
+	if got := history[0].Text; got != "Enabled" {
 		t.Fatalf("stored enabled message text = %q, want %q", got, "Enabled")
 	}
-	if got := len(all["EA1OFF"]); got != 0 {
+	if got := len(a.loadReceivedHistory("EA1OFF")); got != 0 {
 		t.Fatalf("stored disabled message count = %d, want 0", got)
 	}
 }
 
-func TestNormalizeReceivedAPRSStore(t *testing.T) {
-	dir := t.TempDir()
-	a := &app{cfg: config{aprsReceivedFile: filepath.Join(dir, "aprs", "received.json")}}
-	all := map[string][]receivedAPRS{
-		"EA7KLK": {{At: now(), From: "EA1ABC-7", To: "EA7KLK-0", Text: "Old text{2044", Raw: "EA1ABC-7>APRS::EA7KLK-0 :Old text{2044"}},
+func TestStoreReceivedAPRSRejectsAckAndRej(t *testing.T) {
+	a := testApp(t)
+	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {EnableAPRS: true}}); err != nil {
+		t.Fatal(err)
 	}
-	if err := writeJSON(a.cfg.aprsReceivedFile, all); err != nil {
+	for _, text := range []string{"ack42", "rej42"} {
+		_, saved, err := a.storeReceivedAPRS(receivedAPRS{At: now(), From: "EA1ABC-7", To: "EA7KLK-0", Text: text, Raw: text})
+		if err != nil || saved {
+			t.Fatalf("storeReceivedAPRS(%q) saved=%v err=%v, want not saved", text, saved, err)
+		}
+	}
+	if got := len(a.loadReceivedHistory("EA7KLK")); got != 0 {
+		t.Fatalf("stored APRS response message count = %d, want 0", got)
+	}
+}
+
+func TestSentAPRSHistoryLimitAndDelete(t *testing.T) {
+	a := testApp(t)
+	for i := 0; i < sentHistoryLimit+2; i++ {
+		_, err := a.addSentRecord("EA7KLK", sentAPRS{At: now(), From: "EA7KLK-0", To: "EA1ABC", Text: "message", Status: aprsStatusSent})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := a.loadSentHistory("EA7KLK")
+	if got := len(history); got != sentHistoryLimit {
+		t.Fatalf("sent history count = %d, want %d", got, sentHistoryLimit)
+	}
+	if history[0].ID == 0 {
+		t.Fatal("loaded sent history row has no database ID")
+	}
+	if err := a.deleteSentRecord(history[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.loadSentHistory("EA7KLK")); got != sentHistoryLimit-1 {
+		t.Fatalf("sent history count after delete = %d, want %d", got, sentHistoryLimit-1)
+	}
+}
+
+func TestAPRSDetailRowsDoNotSplitMultipartText(t *testing.T) {
+	a := testApp(t)
+	sent := sentAPRS{
+		At:     now(),
+		From:   "EA7KLK-0",
+		To:     "EA1ABC",
+		Text:   "one two\nthree",
+		Status: aprsStatusSent,
+		Parts: []sentAPRSPart{
+			{Number: 1, Text: "[1/2] one two ", Status: aprsStatusSent},
+			{Number: 2, Text: "[2/2] three", Status: aprsStatusSent},
+		},
+	}
+	for _, row := range a.aprsSentDetailRows("en", sent) {
+		if strings.Contains(row[1], "[1/2]") || strings.Contains(row[1], "[2/2]") {
+			t.Fatalf("sent detail leaked multipart chunk text: %#v", row)
+		}
+	}
+	received := receivedAPRS{At: now(), From: "EA1ABC", To: "EA7KLK-0", Text: "one two\nthree", Raw: "raw1\nraw2"}
+	for _, row := range a.aprsReceivedDetailRows("en", received) {
+		if strings.Contains(row[1], "\n") {
+			t.Fatalf("received detail contains embedded newline: %#v", row)
+		}
+	}
+	if rows := a.aprsReceivedDetailRows("en", received); rows[3][1] != "one two three" {
+		t.Fatalf("received detail text = %q, want %q", rows[3][1], "one two three")
+	}
+}
+
+func TestAPRSHistoryLoadsNormalizeMultipartNewlines(t *testing.T) {
+	a := testApp(t)
+	if _, err := a.addSentRecord("EA7KLK", sentAPRS{
+		At:     now(),
+		From:   "EA7KLK-0",
+		To:     "EA1ABC",
+		Text:   "sent one\nsent two",
+		Status: aprsStatusSent,
+		Parts: []sentAPRSPart{
+			{Number: 1, Text: "[1/2] sent one\n", Status: aprsStatusSent, Detail: "ok\npart one"},
+			{Number: 2, Text: "[2/2] sent two", Status: aprsStatusSent},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.addReceivedRecord("EA7KLK", receivedAPRS{At: now(), From: "EA1ABC-7", To: "EA7KLK-0", Text: "received one\nreceived two", Raw: "raw1\nraw2"}); err != nil {
+		t.Fatal(err)
+	}
+	sentHistory := a.loadSentHistory("EA7KLK")
+	if got := sentHistory[0].Text; got != "sent one sent two" {
+		t.Fatalf("loaded sent text = %q, want %q", got, "sent one sent two")
+	}
+	if got := sentHistory[0].Parts[0].Detail; got != "ok part one" {
+		t.Fatalf("loaded sent part detail = %q, want %q", got, "ok part one")
+	}
+	receivedHistory := a.loadReceivedHistory("EA7KLK")
+	if got := receivedHistory[0].Text; got != "received one received two" {
+		t.Fatalf("loaded received text = %q, want %q", got, "received one received two")
+	}
+	if rows := a.aprsSentDetailRows("en", sentHistory[0]); strings.Contains(rows[5][1], "\n") {
+		t.Fatalf("sent detail text contains newline: %#v", rows[5])
+	}
+	if rows := a.aprsReceivedDetailRows("en", receivedHistory[0]); strings.Contains(rows[3][1], "\n") {
+		t.Fatalf("received detail text contains newline: %#v", rows[3])
+	}
+}
+
+func TestReceivedAPRSHistoryLimitAndDelete(t *testing.T) {
+	a := testApp(t)
+	for i := 0; i < receivedHistoryLimit+2; i++ {
+		_, err := a.addReceivedRecord("EA7KLK", receivedAPRS{At: now(), From: "EA1ABC-7", To: "EA7KLK-0", Text: "message", Raw: fmt.Sprintf("raw %d", i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := a.loadReceivedHistory("EA7KLK")
+	if got := len(history); got != receivedHistoryLimit {
+		t.Fatalf("received history count = %d, want %d", got, receivedHistoryLimit)
+	}
+	if history[0].ID == 0 {
+		t.Fatal("loaded received history row has no database ID")
+	}
+	if err := a.deleteReceivedRecord(history[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(a.loadReceivedHistory("EA7KLK")); got != receivedHistoryLimit-1 {
+		t.Fatalf("received history count after delete = %d, want %d", got, receivedHistoryLimit-1)
+	}
+}
+
+func TestNormalizeReceivedAPRSStore(t *testing.T) {
+	a := testApp(t)
+	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {EnableAPRS: true}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := a.addReceivedRecord("EA7KLK", receivedAPRS{
+		At:   now(),
+		From: "EA1ABC-7",
+		To:   "EA7KLK-0",
+		Text: "Old text{2044",
+		Raw:  "EA1ABC-7>APRS::EA7KLK-0 :Old text{2044",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.Model(&dbAPRSReceived{}).Where("user_callsign = ?", "EA7KLK").Update("text", "Old text{2044").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := a.normalizeReceivedAPRSStore(); err != nil {
 		t.Fatal(err)
 	}
-	got := map[string][]receivedAPRS{}
-	if err := readJSON(a.cfg.aprsReceivedFile, &got, map[string][]receivedAPRS{}); err != nil {
-		t.Fatal(err)
-	}
-	if text := got["EA7KLK"][0].Text; text != "Old text" {
+	got := a.loadReceivedHistory("EA7KLK")
+	if text := got[0].Text; text != "Old text" {
 		t.Fatalf("normalized text = %q, want %q", text, "Old text")
 	}
-	if raw := got["EA7KLK"][0].Raw; !strings.Contains(raw, "{2044") {
+	if raw := got[0].Raw; !strings.Contains(raw, "{2044") {
 		t.Fatalf("normalized raw did not preserve message ID: %q", raw)
 	}
 }

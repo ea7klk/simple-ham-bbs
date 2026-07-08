@@ -14,6 +14,7 @@ func newApp() (*app, error) {
 	port, _ := strconv.Atoi(env("APRS_IS_PORT", "14580"))
 	cfg := config{
 		dataDir:              dataDir,
+		dbFile:               env("BBS_DB_FILE", filepath.Join(dataDir, "bbs.sqlite")),
 		usersFile:            filepath.Join(dataDir, "users.json"),
 		messagesFile:         filepath.Join(dataDir, "messages.json"),
 		bulletinsFile:        filepath.Join(dataDir, "bulletins.json"),
@@ -36,7 +37,14 @@ func newApp() (*app, error) {
 	if err := readJSON(cfg.transFile, &text, map[string]map[string]any{}); err != nil {
 		return nil, err
 	}
-	return &app{cfg: cfg, text: text}, nil
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, err
+	}
+	db, err := openDatabase(cfg.dbFile)
+	if err != nil {
+		return nil, err
+	}
+	return &app{cfg: cfg, text: text, db: db}, nil
 }
 
 func env(name, fallback string) string {
@@ -100,24 +108,14 @@ func (a *app) seedData() error {
 	if err := os.MkdirAll(filepath.Join(a.cfg.dataDir, "aprs"), 0o755); err != nil {
 		return err
 	}
-	if !exists(a.cfg.bulletinsFile) {
-		bulletins := []bulletin{
-			{Title: "Welcome", Body: "This is a small HamNet-ready BBS for radio operators.\nUse it for local notes, net announcements, and station contact info.", Updated: now()},
-			{Title: "Operating Notes", Body: "Keep traffic courteous and relevant to amateur radio.\nDo not post private keys, passwords, or third-party personal data.", Updated: now()},
-		}
-		if err := writeJSON(a.cfg.bulletinsFile, bulletins); err != nil {
-			return err
-		}
-	}
-	if !exists(a.cfg.usersFile) {
-		if err := writeJSON(a.cfg.usersFile, map[string]userProfile{}); err != nil {
-			return err
-		}
-	}
 	_ = os.Remove(filepath.Join(a.cfg.dataDir, "aprs", "sent.json"))
-	_ = a.normalizeReceivedAPRSStore()
-	_, err := a.loadBoards()
-	return err
+	if err := a.migrateJSONData(); err != nil {
+		return err
+	}
+	if err := a.seedDefaultData(); err != nil {
+		return err
+	}
+	return a.normalizeReceivedAPRSStore()
 }
 
 func (a *app) run() error {
@@ -141,15 +139,14 @@ func (a *app) run() error {
 		opts := []option{
 			{"1", a.t(lang, "menu_bulletins")},
 			{"2", a.t(lang, "menu_messages")},
-			{"3", a.t(lang, "menu_post")},
-			{"4", a.t(lang, "menu_directory")},
-			{"5", a.t(lang, "menu_profile")},
-			{"6", a.t(lang, "menu_resources")},
-			{"7", a.t(lang, "menu_aprs")},
-			{"8", a.t(lang, "menu_about")},
+			{"3", a.t(lang, "menu_directory")},
+			{"4", a.t(lang, "menu_profile")},
+			{"5", a.t(lang, "menu_resources")},
+			{"6", a.t(lang, "menu_aprs")},
+			{"7", a.t(lang, "menu_about")},
 		}
 		if a.isSysop(callsign, profile) {
-			opts = append(opts, option{"9", a.t(lang, "menu_sysop")})
+			opts = append(opts, option{"8", a.t(lang, "menu_sysop")})
 		}
 		opts = append(opts, option{"q", a.t(lang, "menu_quit")})
 		choice := a.runMenu(lang, a.t(lang, "select"), header, opts)
@@ -159,19 +156,17 @@ func (a *app) run() error {
 		case "2":
 			a.showMessages(callsign, lang)
 		case "3":
-			a.postMessage(callsign, lang)
-		case "4":
 			a.stationDirectory(lang)
-		case "5":
+		case "4":
 			profile = a.changeProfile(callsign, profile, lang)
 			lang = profile.Language
-		case "6":
+		case "5":
 			a.radioResources(lang)
-		case "7":
+		case "6":
 			profile = a.aprsMenu(callsign, profile, lang)
-		case "8":
+		case "7":
 			a.about(lang)
-		case "9":
+		case "8":
 			if a.isSysop(callsign, profile) {
 				a.sysopMenu(callsign, lang)
 			}

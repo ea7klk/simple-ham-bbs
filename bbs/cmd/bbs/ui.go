@@ -27,7 +27,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c":
+		case "ctrl+c", "esc":
 			m.chosen, m.done = "q", true
 			return m, tea.Quit
 		case "up", "k", "shift+tab":
@@ -700,14 +700,20 @@ func (a *app) showInfoActions(lang, title string, rows [][]string, actions []opt
 			lines = append(lines, wrapText(row[0], panelContentWidth)...)
 		} else if len(row) >= 2 {
 			prefix := titleStyle.Render(row[0]) + ": "
-			wrapped := wrapText(row[1], panelContentWidth-2)
+			firstWidth := panelContentWidth - lipgloss.Width(row[0]) - 2
+			if firstWidth < 10 {
+				firstWidth = 10
+			}
+			wrapped := wrapText(row[1], firstWidth)
 			if len(wrapped) == 0 {
 				lines = append(lines, prefix)
 				continue
 			}
 			lines = append(lines, prefix+wrapped[0])
-			for _, line := range wrapped[1:] {
-				lines = append(lines, "  "+line)
+			for _, paragraph := range wrapped[1:] {
+				for _, line := range wrapText(paragraph, panelContentWidth-2) {
+					lines = append(lines, "  "+line)
+				}
 			}
 		}
 	}

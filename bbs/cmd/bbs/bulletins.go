@@ -1,10 +1,40 @@
 package main
 
-import "strconv"
+import (
+	"gorm.io/gorm"
+	"strconv"
+)
+
+func (a *app) loadBulletins() ([]bulletin, error) {
+	rows := []dbBulletin{}
+	err := a.db.Order("position, id").Find(&rows).Error
+	out := make([]bulletin, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, bulletin{Title: row.Title, Body: row.Body, Updated: row.Updated, From: row.From})
+	}
+	return out, err
+}
+
+func (a *app) saveBulletins(bulletins []bulletin) error {
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DELETE FROM db_bulletins").Error; err != nil {
+			return err
+		}
+		for i, item := range bulletins {
+			row := dbBulletin{Position: i, Title: item.Title, Body: item.Body, Updated: item.Updated, From: item.From}
+			if row.Updated == "" {
+				row.Updated = now()
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
 
 func (a *app) showBulletins(lang string) {
-	var bulletins []bulletin
-	_ = readJSON(a.cfg.bulletinsFile, &bulletins, []bulletin{})
+	bulletins, _ := a.loadBulletins()
 	if len(bulletins) == 0 {
 		a.showInfo(lang, a.t(lang, "menu_bulletins"), [][]string{{a.t(lang, "no_bulletins")}})
 		return
@@ -34,16 +64,14 @@ func (a *app) publishBulletin(callsign, lang string) {
 	if !ok {
 		return
 	}
-	var bulletins []bulletin
-	_ = readJSON(a.cfg.bulletinsFile, &bulletins, []bulletin{})
+	bulletins, _ := a.loadBulletins()
 	bulletins = append(bulletins, bulletin{Title: values["title"], Body: values["body"], Updated: now(), From: callsign})
-	_ = writeJSON(a.cfg.bulletinsFile, bulletins)
+	_ = a.saveBulletins(bulletins)
 	a.showInfo(lang, a.t(lang, "bulletin_published"), [][]string{{values["title"]}})
 }
 
 func (a *app) editBulletin(callsign, lang string) {
-	var bulletins []bulletin
-	_ = readJSON(a.cfg.bulletinsFile, &bulletins, []bulletin{})
+	bulletins, _ := a.loadBulletins()
 	if len(bulletins) == 0 {
 		a.showInfo(lang, a.t(lang, "menu_bulletins"), [][]string{{a.t(lang, "no_bulletins")}})
 		return
@@ -73,7 +101,7 @@ func (a *app) editBulletin(callsign, lang string) {
 	if action == "delete" {
 		title := item.Title
 		bulletins = append(bulletins[:idx], bulletins[idx+1:]...)
-		_ = writeJSON(a.cfg.bulletinsFile, bulletins)
+		_ = a.saveBulletins(bulletins)
 		a.showInfo(lang, a.t(lang, "bulletin_deleted"), [][]string{{title}})
 		return
 	}
@@ -82,6 +110,6 @@ func (a *app) editBulletin(callsign, lang string) {
 	item.Updated = now()
 	item.From = callsign
 	bulletins[idx] = item
-	_ = writeJSON(a.cfg.bulletinsFile, bulletins)
+	_ = a.saveBulletins(bulletins)
 	a.showInfo(lang, a.t(lang, "bulletin_updated"), [][]string{{item.Title}})
 }

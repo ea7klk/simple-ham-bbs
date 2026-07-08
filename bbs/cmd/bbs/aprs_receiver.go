@@ -6,10 +6,23 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var aprsMultipartRE = regexp.MustCompile(`^\[([0-9]+)/([0-9]+)\]\s*(.*)$`)
+
+type aprsMultipartBuffer struct {
+	From     string
+	To       string
+	Total    int
+	Parts    map[int]string
+	RawParts map[int]string
+	FirstAt  string
+	Updated  time.Time
+}
 
 func (a *app) runAPRSReceiver() error {
 	login := a.aprsReceiverLogin()
@@ -63,9 +76,10 @@ func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) e
 	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	multipart := map[string]*aprsMultipartBuffer{}
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		line := strings.TrimRight(scanner.Text(), "\r\n")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		if strings.HasPrefix(line, "#") {
@@ -76,16 +90,92 @@ func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) e
 		if !ok {
 			continue
 		}
-		user, saved, err := a.storeReceivedAPRS(msg)
-		if err != nil {
-			a.logAPRSReceiver("APRS receiver store error from=%s to=%s: %v", msg.From, msg.To, err)
+		ready, waiting := collectAPRSMessagePart(multipart, msg)
+		if waiting {
+			a.logAPRSReceiver("APRS multipart message part buffered from=%s to=%s text=%s", msg.From, msg.To, msg.Text)
+			pruneAPRSMessageParts(multipart, 30*time.Minute)
 			continue
 		}
-		if saved {
-			a.logAPRSReceiver("APRS received message user=%s from=%s to=%s text=%s", user, msg.From, msg.To, msg.Text)
+		for _, item := range ready {
+			user, saved, err := a.storeReceivedAPRS(item)
+			if err != nil {
+				a.logAPRSReceiver("APRS receiver store error from=%s to=%s: %v", item.From, item.To, err)
+				continue
+			}
+			if saved {
+				a.logAPRSReceiver("APRS received message user=%s from=%s to=%s text=%s", user, item.From, item.To, item.Text)
+			}
 		}
+		pruneAPRSMessageParts(multipart, 30*time.Minute)
 	}
 	return scanner.Err()
+}
+
+func collectAPRSMessagePart(buffers map[string]*aprsMultipartBuffer, msg receivedAPRS) ([]receivedAPRS, bool) {
+	part, total, body, ok := parseAPRSMultipartPrefix(msg.Text)
+	if !ok {
+		return []receivedAPRS{msg}, false
+	}
+	if total <= 1 {
+		msg.Text = body
+		return []receivedAPRS{msg}, false
+	}
+	key := fmt.Sprintf("%s|%s|%d", normalizeAPRSCallsign(msg.From), normalizeAPRSCallsign(msg.To), total)
+	buf := buffers[key]
+	if buf == nil {
+		buf = &aprsMultipartBuffer{From: msg.From, To: msg.To, Total: total, Parts: map[int]string{}, RawParts: map[int]string{}, FirstAt: msg.At}
+		buffers[key] = buf
+	}
+	buf.Parts[part] = body
+	buf.RawParts[part] = msg.Raw
+	buf.Updated = time.Now()
+	if len(buf.Parts) < total {
+		return nil, true
+	}
+	parts := make([]string, 0, total)
+	rawParts := make([]string, 0, total)
+	for i := 1; i <= total; i++ {
+		text, ok := buf.Parts[i]
+		if !ok {
+			return nil, true
+		}
+		parts = append(parts, text)
+		rawParts = append(rawParts, buf.RawParts[i])
+	}
+	delete(buffers, key)
+	at := buf.FirstAt
+	if at == "" {
+		at = msg.At
+	}
+	return []receivedAPRS{{
+		At:   at,
+		From: buf.From,
+		To:   buf.To,
+		Text: strings.Join(parts, ""),
+		Raw:  strings.Join(rawParts, "\n"),
+	}}, false
+}
+
+func parseAPRSMultipartPrefix(text string) (int, int, string, bool) {
+	matches := aprsMultipartRE.FindStringSubmatch(strings.TrimLeft(text, " \t"))
+	if len(matches) != 4 {
+		return 0, 0, text, false
+	}
+	part, errPart := strconv.Atoi(matches[1])
+	total, errTotal := strconv.Atoi(matches[2])
+	if errPart != nil || errTotal != nil || part < 1 || total < 1 || part > total {
+		return 0, 0, text, false
+	}
+	return part, total, matches[3], true
+}
+
+func pruneAPRSMessageParts(buffers map[string]*aprsMultipartBuffer, maxAge time.Duration) {
+	now := time.Now()
+	for key, buf := range buffers {
+		if !buf.Updated.IsZero() && now.Sub(buf.Updated) > maxAge {
+			delete(buffers, key)
+		}
+	}
 }
 
 func parseAPRSMessageLine(raw string) (receivedAPRS, bool) {
@@ -98,8 +188,8 @@ func parseAPRSMessageLine(raw string) (receivedAPRS, bool) {
 		return receivedAPRS{}, false
 	}
 	to := strings.TrimSpace(info[1:10])
-	text := stripAPRSMessageID(strings.TrimSpace(info[11:]))
-	if to == "" || text == "" {
+	text := stripAPRSMessageID(info[11:])
+	if to == "" || text == "" || isAPRSAckMessage(text) {
 		return receivedAPRS{}, false
 	}
 	return receivedAPRS{
@@ -113,6 +203,9 @@ func parseAPRSMessageLine(raw string) (receivedAPRS, bool) {
 
 func (a *app) storeReceivedAPRS(msg receivedAPRS) (string, bool, error) {
 	msg.Text = stripAPRSMessageID(msg.Text)
+	if isAPRSAckMessage(msg.Text) {
+		return aprsRecipientKey(msg.To), false, nil
+	}
 	users, err := a.loadUsers()
 	if err != nil {
 		return "", false, err
@@ -122,44 +215,54 @@ func (a *app) storeReceivedAPRS(msg receivedAPRS) (string, bool, error) {
 	if !ok || profile.Disabled || !profile.EnableAPRS {
 		return key, false, nil
 	}
-	all := map[string][]receivedAPRS{}
-	if err := readJSON(a.cfg.aprsReceivedFile, &all, map[string][]receivedAPRS{}); err != nil {
-		return key, false, err
-	}
-	history := all[key]
-	for i := len(history) - 1; i >= 0 && i >= len(history)-20; i-- {
-		if history[i].Raw == msg.Raw {
+	if msg.Raw != "" {
+		var count int64
+		if err := a.db.Model(&dbAPRSReceived{}).Where("user_callsign = ? AND raw = ?", key, msg.Raw).Count(&count).Error; err != nil {
+			return key, false, err
+		}
+		if count > 0 {
 			return key, false, nil
 		}
 	}
-	history = append(history, msg)
-	if len(history) > receivedHistoryLimit {
-		history = history[len(history)-receivedHistoryLimit:]
+	_, err = a.addReceivedRecord(key, msg)
+	return key, err == nil, err
+}
+
+func isAPRSAckMessage(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(stripAPRSMessageID(text)))
+	return isAPRSResponseToken(text, "ack") || isAPRSResponseToken(text, "rej")
+}
+
+func isAPRSResponseToken(text, prefix string) bool {
+	suffix, ok := strings.CutPrefix(text, prefix)
+	if !ok {
+		return false
 	}
-	all[key] = history
-	return key, true, writeJSON(a.cfg.aprsReceivedFile, all)
+	if suffix == "" {
+		return true
+	}
+	if len([]rune(suffix)) > 5 {
+		return false
+	}
+	for _, r := range suffix {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'z') {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *app) normalizeReceivedAPRSStore() error {
-	all := map[string][]receivedAPRS{}
-	if err := readJSON(a.cfg.aprsReceivedFile, &all, map[string][]receivedAPRS{}); err != nil {
+	users, err := a.loadUsers()
+	if err != nil {
 		return err
 	}
-	changed := false
-	for key, history := range all {
-		for i := range history {
-			cleaned := stripAPRSMessageID(history[i].Text)
-			if cleaned != history[i].Text {
-				history[i].Text = cleaned
-				changed = true
-			}
+	for callsign := range users {
+		if err := a.trimReceivedRows(callsign); err != nil {
+			return err
 		}
-		all[key] = history
 	}
-	if !changed {
-		return nil
-	}
-	return writeJSON(a.cfg.aprsReceivedFile, all)
+	return nil
 }
 
 func aprsRecipientKey(to string) string {

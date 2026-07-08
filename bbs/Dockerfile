@@ -1,31 +1,29 @@
-FROM golang:1.22-bookworm AS build
+FROM golang:1.22-alpine AS build
 
 WORKDIR /src
+RUN apk add --no-cache build-base
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
-RUN go build -trimpath -ldflags="-s -w" -o /out/bbs_app ./cmd/bbs
+RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/bbs_app ./cmd/bbs
 
-FROM python:3.12-slim AS aprsd
+FROM python:3.12-alpine AS aprsd
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache git
 
 RUN python -m venv /opt/aprsd \
     && /opt/aprsd/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/aprsd/bin/pip install --no-cache-dir git+https://github.com/craigerl/aprsd.git
 
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
 ENV APRSD_BIN=/opt/aprsd/bin/aprsd
 ENV PATH="/opt/aprsd/bin:${PATH}"
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates iproute2 openssh-server tini \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache bash ca-certificates iproute2 openssh-server sqlite tini
 
-RUN useradd --create-home --shell /bin/bash bbs \
+RUN addgroup -S bbs \
+    && adduser -S -D -h /home/bbs -s /bin/bash -G bbs bbs \
     && mkdir -p /run/sshd /var/lib/bbs /home/bbs/.ssh \
     && chown -R bbs:bbs /var/lib/bbs /home/bbs/.ssh \
     && chmod 700 /home/bbs/.ssh
@@ -41,5 +39,5 @@ RUN chmod 755 /usr/local/bin/bbs_app /usr/local/bin/bbs_session.sh /usr/local/bi
 
 EXPOSE 2222
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/usr/sbin/sshd", "-D", "-e"]
