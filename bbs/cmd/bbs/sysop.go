@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"gorm.io/gorm"
 	"strconv"
 	"strings"
 )
@@ -168,8 +169,28 @@ func (a *app) confirmAndDeleteUser(current, lang string, users map[string]userPr
 		return
 	}
 	delete(users, target)
+	_ = a.deleteUserAPRSHistory(target)
 	_ = a.saveUsers(users)
 	a.showInfo(lang, a.t(lang, "user_deleted"), [][]string{{target}})
+}
+
+func (a *app) deleteUserAPRSHistory(callsign string) error {
+	key := normalizeCallsign(callsign)
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		var sentRows []dbAPRSSent
+		if err := tx.Where("user_callsign = ?", key).Find(&sentRows).Error; err != nil {
+			return err
+		}
+		for _, row := range sentRows {
+			if err := tx.Delete(&dbAPRSSentPart{}, "sent_id = ?", row.ID).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Delete(&dbAPRSSent{}, "user_callsign = ?", key).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&dbAPRSReceived{}, "user_callsign = ?", key).Error
+	})
 }
 
 func (a *app) wouldRemoveLastSysopWithProfile(users map[string]userProfile, callsign string, profile userProfile) bool {
