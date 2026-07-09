@@ -53,6 +53,9 @@ func TestFormatAPRSMessagePacket(t *testing.T) {
 	if got, want := formatAPRSAckPacket("ea7klk-0", "ea1abc-0", "a1"), "EA7KLK-0>APRS,TCPIP*::EA1ABC-0 :ackA1"; got != want {
 		t.Fatalf("formatAPRSAckPacket() = %q, want %q", got, want)
 	}
+	if got := withAPRSMessageID("Hello", "a1"); got != "Hello{A1" {
+		t.Fatalf("withAPRSMessageID() = %q, want Hello{A1", got)
+	}
 }
 
 func TestComposeAPRSDestinationBlankSSID(t *testing.T) {

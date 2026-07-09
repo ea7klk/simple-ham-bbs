@@ -672,6 +672,48 @@ func (a *app) sendAPRSParts(source string, passcode int, destination string, par
 	return out, allOK
 }
 
+func (a *app) sendAPRSAck(source, destination, messageID string) error {
+	source = normalizeAPRSCallsign(source)
+	destination = normalizeAPRSCallsign(destination)
+	messageID = normalizeAPRSMessageID(messageID)
+	if !validAPRSCallsign(source) {
+		return fmt.Errorf("invalid APRS ACK source: %s", source)
+	}
+	if !validAPRSCallsign(destination) {
+		return fmt.Errorf("invalid APRS ACK destination: %s", destination)
+	}
+	if messageID == "" {
+		return fmt.Errorf("missing APRS ACK message ID")
+	}
+	passcode := aprsPasscode(source)
+	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
+	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	if err != nil {
+		detail := fmt.Sprintf("APRS-IS unreachable at %s: %v", address, err)
+		a.logAPRSSendResult(source, destination, "ack"+messageID, "", detail, err)
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+	reader := bufio.NewReader(conn)
+	loginLine := fmt.Sprintf("user %s pass %d vers HamNetBBS 0.1\r\n", source, passcode)
+	if _, err := conn.Write([]byte(loginLine)); err != nil {
+		a.logAPRSSendResult(source, destination, "ack"+messageID, "", "", err)
+		return err
+	}
+	response, err := readAPRSISLoginResponse(reader)
+	if err != nil {
+		a.logAPRSSendResult(source, destination, "ack"+messageID, "", response, err)
+		return err
+	}
+
+	packet := formatAPRSAckPacket(source, destination, messageID)
+	err = writeAPRSISPacket(conn, packet)
+	a.logAPRSSendResult(source, destination, "ack"+messageID, packet, response, err)
+	return err
+}
+
 func readAPRSISLoginResponse(reader *bufio.Reader) (string, error) {
 	lines := []string{}
 	for i := 0; i < 8; i++ {
