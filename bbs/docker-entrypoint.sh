@@ -26,7 +26,6 @@ touch "$data_dir/aprs/receiver.log"
 chown -R bbs:bbs /home/bbs/.ssh
 chown -R bbs:bbs "$data_dir" || echo "Warning: could not change ownership of $data_dir"
 chmod 700 /home/bbs/.ssh
-rm -f "$data_dir/aprs/sent.json"
 
 if [ ! -s "$host_key_dir/ssh_host_rsa_key" ]; then
   ssh-keygen -q -t rsa -b 4096 -f "$host_key_dir/ssh_host_rsa_key" -N ""

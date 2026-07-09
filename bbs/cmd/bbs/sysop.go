@@ -61,8 +61,17 @@ func (a *app) listUsers(current, lang string, users map[string]userProfile) {
 
 func (a *app) chooseUser(lang string, users map[string]userProfile, current string) (string, bool) {
 	opts := []option{}
+	targets := []string{}
 	i := 1
 	keys := sortedKeys(users)
+	const callsignWidth = 10
+	const lastSeenWidth = 20
+	const statusWidth = 10
+	const roleWidth = 8
+	nameWidth := panelContentWidth - 7 - callsignWidth - lastSeenWidth - statusWidth - roleWidth - 4
+	if nameWidth < 12 {
+		nameWidth = 12
+	}
 	for _, key := range keys {
 		if key == current {
 			continue
@@ -76,11 +85,14 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 		if p.Disabled {
 			status = a.t(lang, "disabled")
 		}
-		opts = append(opts, option{strconv.Itoa(i), key + " - " + status + " / " + role + " / " + p.FullName})
+		row := userListRow(key, p.LastSeen, status, role, p.FullName, nameWidth)
+		opts = append(opts, option{strconv.Itoa(i), row})
+		targets = append(targets, key)
 		i++
 	}
 	opts = append(opts, option{"q", a.t(lang, "menu_quit")})
-	choice := a.runMenu(lang, a.t(lang, "target_callsign"), "", opts)
+	header := userListRow(a.t(lang, "target_callsign"), a.t(lang, "last_connection"), a.t(lang, "account_status"), a.t(lang, "role"), a.t(lang, "full_name"), nameWidth)
+	choice := a.runMenu(lang, a.t(lang, "target_callsign"), header, opts)
 	if choice == "q" {
 		return "", false
 	}
@@ -88,7 +100,27 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 	if idx < 1 || idx > len(opts)-1 {
 		return "", false
 	}
-	return strings.SplitN(opts[idx-1].label, " - ", 2)[0], true
+	return targets[idx-1], true
+}
+
+func userListRow(callsign, lastSeen, status, role, fullName string, nameWidth int) string {
+	if lastSeen == "" {
+		lastSeen = "-"
+	}
+	return paddedCell(callsign, 10) + " " +
+		paddedCell(lastSeen, 20) + " " +
+		paddedCell(status, 10) + " " +
+		paddedCell(role, 8) + " " +
+		truncateText(fullName, nameWidth)
+}
+
+func paddedCell(text string, width int) string {
+	text = truncateText(text, width)
+	padding := width - len([]rune(text))
+	if padding < 0 {
+		padding = 0
+	}
+	return text + strings.Repeat(" ", padding)
 }
 
 func (a *app) editUserDetail(current, lang string, users map[string]userProfile, target string) {

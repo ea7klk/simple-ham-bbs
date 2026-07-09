@@ -128,22 +128,6 @@ func firstNonEmpty(values ...any) any {
 	return ""
 }
 
-func mapToMessage(raw any) (message, bool) {
-	item, ok := raw.(map[string]any)
-	if !ok {
-		return message{}, false
-	}
-	replies := []message{}
-	if rawReplies, ok := item["replies"].([]any); ok {
-		for _, rawReply := range rawReplies {
-			if reply, ok := mapToMessage(rawReply); ok {
-				replies = append(replies, reply)
-			}
-		}
-	}
-	return message{From: fmt.Sprint(item["from"]), Subject: fmt.Sprint(item["subject"]), Body: fmt.Sprint(item["body"]), Created: fmt.Sprint(item["created"]), Edited: fmt.Sprint(item["edited"]), Replies: replies}, true
-}
-
 func reverseSent(items []sentAPRS) []sentAPRS {
 	out := make([]sentAPRS, len(items))
 	for i := range items {

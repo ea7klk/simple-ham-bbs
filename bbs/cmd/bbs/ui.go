@@ -85,7 +85,7 @@ func (m menuModel) View() string {
 	if end < len(m.options) {
 		b.WriteString(dimStyle.Render("...") + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render(m.app.t(m.lang, "menu_hint_actions")))
+	b.WriteString("\n" + dimWrapped(m.app.t(m.lang, "menu_hint_actions"), panelContentWidth))
 	return panelStyle.Render(b.String())
 }
 
@@ -136,6 +136,14 @@ func limitLines(text string, maxLines int) string {
 	out := append([]string{}, lines[:maxLines]...)
 	out[maxLines-1] = dimStyle.Render("...")
 	return strings.Join(out, "\n")
+}
+
+func dimWrapped(text string, width int) string {
+	lines := wrapText(text, width)
+	for i := range lines {
+		lines[i] = dimStyle.Render(lines[i])
+	}
+	return strings.Join(lines, "\n")
 }
 
 func wrapText(text string, width int) []string {
@@ -207,20 +215,24 @@ type formField struct {
 }
 
 type formModel struct {
-	app     *app
-	lang    string
-	title   string
-	fields  []formField
-	buttons []string
-	focus   int
-	err     string
-	action  string
-	values  map[string]string
-	done    bool
+	app       *app
+	lang      string
+	title     string
+	fields    []formField
+	buttons   []string
+	noButtons bool
+	focus     int
+	err       string
+	action    string
+	values    map[string]string
+	done      bool
 }
 
 func newFormModel(a *app, lang, title string, fields []formField, buttons []string) formModel {
-	if len(buttons) == 0 {
+	noButtons := buttons == nil
+	if noButtons {
+		buttons = []string{}
+	} else if len(buttons) == 0 {
 		buttons = []string{"save", "cancel"}
 	}
 	inputWidth := 40
@@ -247,7 +259,7 @@ func newFormModel(a *app, lang, title string, fields []formField, buttons []stri
 			fields[i].area = ta
 		}
 	}
-	m := formModel{app: a, lang: lang, title: title, fields: fields, buttons: buttons}
+	m := formModel{app: a, lang: lang, title: title, fields: fields, buttons: buttons, noButtons: noButtons}
 	m.setFocus(0)
 	return m
 }
@@ -330,6 +342,15 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.String() == "enter" && field.kind != fieldTextArea {
+			if m.noButtons && m.focus == len(m.fields)-1 {
+				values, err := m.validate()
+				if err != "" {
+					m.err = err
+					return m, nil
+				}
+				m.action, m.values, m.done = "submit", values, true
+				return m, tea.Quit
+			}
 			m.setFocus(m.focus + 1)
 			return m, nil
 		}
@@ -416,11 +437,18 @@ func (m formModel) View() string {
 	if m.err != "" {
 		b.WriteString("\n\n" + errorStyle.Render(m.err))
 	}
-	b.WriteString("\n" + dimStyle.Render(m.app.t(m.lang, "form_hint_actions")))
+	hintKey := "form_hint_actions"
+	if m.noButtons {
+		hintKey = "form_hint_submit"
+	}
+	b.WriteString("\n" + dimWrapped(m.app.t(m.lang, hintKey), panelContentWidth))
 	return formPanelStyle.Render(b.String())
 }
 
 func (m formModel) renderButtons() string {
+	if len(m.buttons) == 0 {
+		return ""
+	}
 	var b strings.Builder
 	for i, button := range m.buttons {
 		label := m.app.t(m.lang, buttonLabelKey(button))
@@ -680,7 +708,7 @@ func (m infoModel) View() string {
 		}
 		hint += "  " + strings.Join(parts, "  ")
 	}
-	b.WriteString("\n" + dimStyle.Render(hint))
+	b.WriteString("\n" + dimWrapped(hint, panelContentWidth))
 	return panelStyle.Render(b.String())
 }
 

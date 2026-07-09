@@ -28,49 +28,6 @@ func (a *app) loadBoards() (boardsData, error) {
 	return data, nil
 }
 
-func normalizeBoards(raw any) boardsData {
-	switch v := raw.(type) {
-	case []any:
-		msgs := []message{}
-		for _, item := range v {
-			if m, ok := mapToMessage(item); ok {
-				msgs = append(msgs, m)
-			}
-		}
-		return boardsData{Boards: []board{defaultBoard(msgs)}}
-	case map[string]any:
-		items, _ := v["boards"].([]any)
-		out := boardsData{}
-		seen := map[string]bool{}
-		for _, item := range items {
-			bm, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			name := strings.TrimSpace(fmt.Sprint(firstNonEmpty(bm["name"], bm["id"], "General")))
-			id := boardID(fmt.Sprint(firstNonEmpty(bm["id"], name)))
-			base := id
-			for i := 2; seen[id]; i++ {
-				id = fmt.Sprintf("%s-%d", base, i)
-			}
-			seen[id] = true
-			msgs := []message{}
-			if rawMsgs, ok := bm["messages"].([]any); ok {
-				for _, rawMsg := range rawMsgs {
-					if m, ok := mapToMessage(rawMsg); ok {
-						msgs = append(msgs, m)
-					}
-				}
-			}
-			out.Boards = append(out.Boards, board{ID: id, Name: clip(name, 60), Description: clip(fmt.Sprint(bm["description"]), 120), Created: fmt.Sprint(firstNonEmpty(bm["created"], now())), Messages: msgs})
-		}
-		if len(out.Boards) > 0 {
-			return out
-		}
-	}
-	return boardsData{Boards: []board{defaultBoard(nil)}}
-}
-
 func defaultBoard(messages []message) board {
 	return board{ID: defaultBoardID, Name: "General", Description: "General local messages", Created: now(), Messages: messages}
 }
