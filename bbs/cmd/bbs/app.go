@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newApp() (*app, error) {
@@ -15,11 +17,6 @@ func newApp() (*app, error) {
 	cfg := config{
 		dataDir:              dataDir,
 		dbFile:               env("BBS_DB_FILE", filepath.Join(dataDir, "bbs.sqlite")),
-		usersFile:            filepath.Join(dataDir, "users.json"),
-		messagesFile:         filepath.Join(dataDir, "messages.json"),
-		bulletinsFile:        filepath.Join(dataDir, "bulletins.json"),
-		aprsSentFile:         filepath.Join(dataDir, "aprs", "sent-aprsd.json"),
-		aprsReceivedFile:     filepath.Join(dataDir, "aprs", "received.json"),
 		aprsLogFile:          filepath.Join(dataDir, "aprs", "aprsd.log"),
 		aprsReceiverLogFile:  filepath.Join(dataDir, "aprs", "receiver.log"),
 		transFile:            env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
@@ -98,7 +95,22 @@ func (a *app) tList(lang, key string) []string {
 }
 
 func (a *app) banner(lang string) string {
-	return titleStyle.Render(a.cfg.name) + "\n" + subtitleStyle.Render(a.cfg.location+" - "+a.cfg.topic) + "\n\n"
+	line := a.cfg.name
+	if a.currentUser != "" {
+		userText := fmt.Sprintf("%s: %s", a.t(lang, "current_user_label"), a.currentUser)
+		userWidth := lipgloss.Width(userText)
+		titleWidth := panelContentWidth - userWidth - 1
+		if titleWidth < 1 {
+			titleWidth = 1
+		}
+		line = truncateText(line, titleWidth)
+		spaces := panelContentWidth - lipgloss.Width(line) - userWidth
+		if spaces < 1 {
+			spaces = 1
+		}
+		line += strings.Repeat(" ", spaces) + userText
+	}
+	return titleStyle.Render(line) + "\n" + subtitleStyle.Render(a.cfg.location+" - "+a.cfg.topic) + "\n\n"
 }
 
 func (a *app) seedData() error {
@@ -106,10 +118,6 @@ func (a *app) seedData() error {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Join(a.cfg.dataDir, "aprs"), 0o755); err != nil {
-		return err
-	}
-	_ = os.Remove(filepath.Join(a.cfg.dataDir, "aprs", "sent.json"))
-	if err := a.migrateJSONData(); err != nil {
 		return err
 	}
 	if err := a.seedDefaultData(); err != nil {
@@ -130,6 +138,7 @@ func (a *app) run() error {
 	if lang == "" {
 		lang = "en"
 	}
+	a.currentUser = callsign
 	for {
 		header := fmt.Sprintf("%s %s", a.t(lang, "logged_in_as"), callsign)
 		if a.isSysop(callsign, profile) {

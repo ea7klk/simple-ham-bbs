@@ -1,17 +1,9 @@
 package main
 
 import (
-	"os"
-
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
-
-type dbMeta struct {
-	Key   string `gorm:"primaryKey"`
-	Value string
-}
 
 type dbUser struct {
 	Callsign     string `gorm:"primaryKey;size:32"`
@@ -101,132 +93,10 @@ func openDatabase(path string) (*gorm.DB, error) {
 		return nil, err
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&dbMeta{}, &dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}); err != nil {
+	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}); err != nil {
 		return nil, err
 	}
 	return db, nil
-}
-
-func (a *app) migrateJSONData() error {
-	if err := a.migrateUsersJSON(); err != nil {
-		return err
-	}
-	if err := a.migrateBulletinsJSON(); err != nil {
-		return err
-	}
-	if err := a.migrateBoardsJSON(); err != nil {
-		return err
-	}
-	if err := a.migrateAPRSHistoriesJSON(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *app) migrationDone(key string) bool {
-	var item dbMeta
-	return a.db.First(&item, "key = ?", key).Error == nil
-}
-
-func (a *app) markMigrationDone(key string) error {
-	return a.db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&dbMeta{Key: key, Value: now()}).Error
-}
-
-func (a *app) migrateUsersJSON() error {
-	const key = "migrated_json_users"
-	if a.migrationDone(key) || !exists(a.cfg.usersFile) {
-		return nil
-	}
-	users := map[string]userProfile{}
-	if err := readJSON(a.cfg.usersFile, &users, map[string]userProfile{}); err != nil {
-		return err
-	}
-	if len(users) > 0 {
-		if err := a.saveUsers(users); err != nil {
-			return err
-		}
-	}
-	return a.markMigrationDone(key)
-}
-
-func (a *app) migrateBulletinsJSON() error {
-	const key = "migrated_json_bulletins"
-	if a.migrationDone(key) || !exists(a.cfg.bulletinsFile) {
-		return nil
-	}
-	bulletins := []bulletin{}
-	if err := readJSON(a.cfg.bulletinsFile, &bulletins, []bulletin{}); err != nil {
-		return err
-	}
-	if len(bulletins) > 0 {
-		if err := a.saveBulletins(bulletins); err != nil {
-			return err
-		}
-	}
-	return a.markMigrationDone(key)
-}
-
-func (a *app) migrateBoardsJSON() error {
-	const key = "migrated_json_boards"
-	if a.migrationDone(key) || !exists(a.cfg.messagesFile) {
-		return nil
-	}
-	var raw any
-	if err := readJSON(a.cfg.messagesFile, &raw, nil); err != nil {
-		return err
-	}
-	data := normalizeBoards(raw)
-	if len(data.Boards) > 0 {
-		if err := a.saveBoards(data); err != nil {
-			return err
-		}
-	}
-	return a.markMigrationDone(key)
-}
-
-func (a *app) migrateAPRSHistoriesJSON() error {
-	if err := a.migrateAPRSSentJSON(); err != nil {
-		return err
-	}
-	return a.migrateAPRSReceivedJSON()
-}
-
-func (a *app) migrateAPRSSentJSON() error {
-	const key = "migrated_json_aprs_sent"
-	if a.migrationDone(key) || !exists(a.cfg.aprsSentFile) {
-		return nil
-	}
-	all := map[string][]sentAPRS{}
-	if err := readJSON(a.cfg.aprsSentFile, &all, map[string][]sentAPRS{}); err != nil {
-		return err
-	}
-	for callsign, history := range all {
-		for _, item := range history {
-			if _, err := a.addSentRecord(normalizeCallsign(callsign), item); err != nil {
-				return err
-			}
-		}
-	}
-	return a.markMigrationDone(key)
-}
-
-func (a *app) migrateAPRSReceivedJSON() error {
-	const key = "migrated_json_aprs_received"
-	if a.migrationDone(key) || !exists(a.cfg.aprsReceivedFile) {
-		return nil
-	}
-	all := map[string][]receivedAPRS{}
-	if err := readJSON(a.cfg.aprsReceivedFile, &all, map[string][]receivedAPRS{}); err != nil {
-		return err
-	}
-	for callsign, history := range all {
-		for _, item := range history {
-			if _, err := a.addReceivedRecord(normalizeCallsign(callsign), item); err != nil {
-				return err
-			}
-		}
-	}
-	return a.markMigrationDone(key)
 }
 
 func (a *app) seedDefaultData() error {
@@ -250,10 +120,4 @@ func (a *app) seedDefaultData() error {
 		return a.saveBoards(boardsData{Boards: []board{defaultBoard(nil)}})
 	}
 	return nil
-}
-
-func removeIfExists(path string) {
-	if path != "" {
-		_ = os.Remove(path)
-	}
 }

@@ -28,7 +28,7 @@ func (a *app) authenticate() (string, userProfile, error) {
 				normalizer: normalizeCallsign, validator: func(v string) bool { return callsignRE.MatchString(v) }, invalidText: a.t("en", "invalid_callsign"),
 			},
 			{name: "password", label: a.t("en", "password"), kind: fieldPassword},
-		}, []string{"login"})
+		}, nil)
 		if !ok {
 			return "", userProfile{}, errLoginCancelled
 		}

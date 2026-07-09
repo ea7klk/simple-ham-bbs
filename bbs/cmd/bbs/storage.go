@@ -8,12 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/pbkdf2"
-	"gorm.io/gorm"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/pbkdf2"
+	"gorm.io/gorm"
 )
 
 func (a *app) loadUsers() (map[string]userProfile, error) {
@@ -158,21 +158,6 @@ func readJSON[T any](path string, target *T, fallback T) error {
 		return nil
 	}
 	return nil
-}
-
-func writeJSON(path string, data any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 func exists(path string) bool {

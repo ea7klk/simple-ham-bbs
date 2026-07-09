@@ -47,11 +47,6 @@ var (
 type config struct {
 	dataDir              string
 	dbFile               string
-	usersFile            string
-	messagesFile         string
-	bulletinsFile        string
-	aprsSentFile         string
-	aprsReceivedFile     string
 	aprsLogFile          string
 	aprsReceiverLogFile  string
 	transFile            string
@@ -67,9 +62,10 @@ type config struct {
 }
 
 type app struct {
-	cfg  config
-	text map[string]map[string]any
-	db   *gorm.DB
+	cfg         config
+	text        map[string]map[string]any
+	db          *gorm.DB
+	currentUser string
 }
 
 type userProfile struct {
