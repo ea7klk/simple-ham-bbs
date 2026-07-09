@@ -79,7 +79,9 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 		action := a.showInfoActions(lang, a.t(lang, "aprs_received_message_detail"), a.aprsReceivedDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"r", a.t(lang, "reply_button")}, {"d", a.t(lang, "delete_button")}})
 		switch action {
 		case "d":
-			_ = a.deleteReceivedRecord(history[idx].ID)
+			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
+				_ = a.deleteReceivedRecord(history[idx].ID)
+			}
 		case "r":
 			a.sendAPRSForm(callsign, profile, lang, normalizeAPRSCallsign(history[idx].From))
 		}
@@ -153,7 +155,9 @@ func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
 		}
 		action := a.showInfoActions(lang, a.t(lang, "aprs_sent_message_detail"), a.aprsSentDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
 		if action == "d" {
-			_ = a.deleteSentRecord(history[idx].ID)
+			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
+				_ = a.deleteSentRecord(history[idx].ID)
+			}
 		}
 	}
 }

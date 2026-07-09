@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"gorm.io/gorm"
 	"strconv"
 )
@@ -56,12 +57,41 @@ func (a *app) showBulletins(lang string) {
 	a.showInfo(lang, item.Title, [][]string{{a.t(lang, "at"), item.Updated}, {a.t(lang, "from"), item.From}, {"Text", item.Body}})
 }
 
-func (a *app) publishBulletin(callsign, lang string) {
-	_, values, ok := a.runForm(lang, a.t(lang, "bulletin_form_title"), []formField{
+func (a *app) manageBulletins(callsign, lang string) {
+	for {
+		bulletins, _ := a.loadBulletins()
+		opts := []option{{"a", a.t(lang, "add_new_bulletin")}}
+		for i, item := range bulletins {
+			opts = append(opts, option{strconv.Itoa(i + 1), item.Title + " - " + item.Updated})
+		}
+		opts = append(opts, option{"q", a.t(lang, "menu_quit")})
+		header := ""
+		if len(bulletins) == 0 {
+			header = a.t(lang, "no_bulletins")
+		}
+		choice := a.runMenu(lang, a.t(lang, "sysop_manage_bulletins"), header, opts)
+		if choice == "q" {
+			return
+		}
+		if choice == "a" {
+			a.addBulletin(callsign, lang)
+			continue
+		}
+		idx, _ := strconv.Atoi(choice)
+		idx--
+		if idx < 0 || idx >= len(bulletins) {
+			continue
+		}
+		a.editBulletinAt(callsign, lang, bulletins, idx)
+	}
+}
+
+func (a *app) addBulletin(callsign, lang string) {
+	action, values, ok := a.runForm(lang, a.t(lang, "bulletin_form_title"), []formField{
 		{name: "title", label: a.t(lang, "bulletin_title"), required: true, limit: 100},
 		{name: "body", label: a.t(lang, "bulletin_body"), kind: fieldTextArea, required: true, limit: 4000},
 	}, []string{"save", "cancel"})
-	if !ok {
+	if !ok || action == "cancel" {
 		return
 	}
 	bulletins, _ := a.loadBulletins()
@@ -70,26 +100,7 @@ func (a *app) publishBulletin(callsign, lang string) {
 	a.showInfo(lang, a.t(lang, "bulletin_published"), [][]string{{values["title"]}})
 }
 
-func (a *app) editBulletin(callsign, lang string) {
-	bulletins, _ := a.loadBulletins()
-	if len(bulletins) == 0 {
-		a.showInfo(lang, a.t(lang, "menu_bulletins"), [][]string{{a.t(lang, "no_bulletins")}})
-		return
-	}
-	opts := []option{}
-	for i, item := range bulletins {
-		opts = append(opts, option{strconv.Itoa(i + 1), item.Title + " - " + item.Updated})
-	}
-	opts = append(opts, option{"q", a.t(lang, "menu_quit")})
-	choice := a.runMenu(lang, a.t(lang, "select_bulletin_edit"), "", opts)
-	if choice == "q" {
-		return
-	}
-	idx, _ := strconv.Atoi(choice)
-	idx--
-	if idx < 0 || idx >= len(bulletins) {
-		return
-	}
+func (a *app) editBulletinAt(callsign, lang string, bulletins []bulletin, idx int) {
 	item := bulletins[idx]
 	action, values, ok := a.runForm(lang, a.t(lang, "bulletin_edit_title"), []formField{
 		{name: "title", label: a.t(lang, "bulletin_title"), value: item.Title, required: true, limit: 100},
@@ -100,6 +111,9 @@ func (a *app) editBulletin(callsign, lang string) {
 	}
 	if action == "delete" {
 		title := item.Title
+		if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_bulletin"), title)) {
+			return
+		}
 		bulletins = append(bulletins[:idx], bulletins[idx+1:]...)
 		_ = a.saveBulletins(bulletins)
 		a.showInfo(lang, a.t(lang, "bulletin_deleted"), [][]string{{title}})

@@ -13,12 +13,11 @@ func (a *app) sysopMenu(callsign, lang string) {
 		choice := a.runMenu(lang, a.t(lang, "sysop_menu_title"), "", []option{
 			{"1", a.t(lang, "sysop_list_users")},
 			{"2", a.t(lang, "sysop_toggle_sysop")},
-			{"3", a.t(lang, "sysop_publish_bulletin")},
-			{"4", a.t(lang, "sysop_edit_bulletin")},
-			{"5", a.t(lang, "sysop_add_board")},
-			{"6", a.t(lang, "sysop_delete_board")},
-			{"7", a.t(lang, "sysop_rename_board")},
-			{"8", a.t(lang, "sysop_delete_message")},
+			{"3", a.t(lang, "sysop_manage_bulletins")},
+			{"4", a.t(lang, "sysop_add_board")},
+			{"5", a.t(lang, "sysop_delete_board")},
+			{"6", a.t(lang, "sysop_rename_board")},
+			{"7", a.t(lang, "sysop_delete_message")},
 			{"q", a.t(lang, "menu_quit")},
 		})
 		switch choice {
@@ -27,16 +26,14 @@ func (a *app) sysopMenu(callsign, lang string) {
 		case "2":
 			a.toggleSysop(callsign, lang, users)
 		case "3":
-			a.publishBulletin(callsign, lang)
+			a.manageBulletins(callsign, lang)
 		case "4":
-			a.editBulletin(callsign, lang)
-		case "5":
 			a.addBoard(lang)
-		case "6":
+		case "5":
 			a.deleteBoard(lang)
-		case "7":
+		case "6":
 			a.renameBoard(lang)
-		case "8":
+		case "7":
 			a.editBoardMessage(lang)
 		case "q":
 			return
@@ -196,8 +193,7 @@ func (a *app) confirmAndDeleteUser(current, lang string, users map[string]userPr
 		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
 		return
 	}
-	action, _, ok := a.runForm(lang, fmt.Sprintf(a.t(lang, "confirm_delete_user"), target), nil, []string{"no", "yes"})
-	if !ok || action != "yes" {
+	if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_user"), target)) {
 		return
 	}
 	delete(users, target)
@@ -287,7 +283,14 @@ func (a *app) addBoard(lang string) {
 func (a *app) deleteBoard(lang string) {
 	data, _ := a.loadBoards()
 	idx, ok := a.selectBoard(lang, data, "select_board_delete")
-	if !ok || len(data.Boards) <= 1 {
+	if !ok {
+		return
+	}
+	if len(data.Boards) <= 1 {
+		a.showInfo(lang, a.t(lang, "sysop_delete_board"), [][]string{{a.t(lang, "cannot_delete_last_board")}})
+		return
+	}
+	if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_board"), data.Boards[idx].Name)) {
 		return
 	}
 	data.Boards = append(data.Boards[:idx], data.Boards[idx+1:]...)
@@ -349,6 +352,9 @@ func (a *app) editBoardMessage(lang string) {
 		return
 	}
 	if action == "delete" {
+		if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_message"), msg.Subject)) {
+			return
+		}
 		if messages, deleted := deleteMessageAtPath(data.Boards[idx].Messages, path); deleted {
 			data.Boards[idx].Messages = messages
 		}
