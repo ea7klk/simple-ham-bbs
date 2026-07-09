@@ -220,12 +220,16 @@ func TestAPRSDetailRowsDoNotSplitMultipartText(t *testing.T) {
 	}
 	received := receivedAPRS{At: now(), From: "EA1ABC", To: "EA7KLK-0", Text: "one two\nthree", Raw: "raw1\nraw2"}
 	for _, row := range a.aprsReceivedDetailRows("en", received) {
-		if strings.Contains(row[1], "\n") {
+		if len(row) > 1 && strings.Contains(row[1], "\n") {
 			t.Fatalf("received detail contains embedded newline: %#v", row)
 		}
 	}
-	if rows := a.aprsReceivedDetailRows("en", received); rows[3][1] != "one two three" {
+	rows := a.aprsReceivedDetailRows("en", received)
+	if rows[3][1] != "one two three" {
 		t.Fatalf("received detail text = %q, want %q", rows[3][1], "one two three")
+	}
+	if len(rows) < 8 || rows[4][0] != "" || !strings.HasPrefix(rows[5][0], "---") || rows[6][0] != "" {
+		t.Fatalf("received detail missing separator before raw packet: %#v", rows)
 	}
 }
 

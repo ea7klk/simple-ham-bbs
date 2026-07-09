@@ -252,7 +252,12 @@ func (a *app) aprsReceivedDetailRows(lang string, item receivedAPRS) [][]string 
 		{a.t(lang, "aprs_text"), singleLineAPRSDetail(stripAPRSMessageID(item.Text))},
 	}
 	if item.Raw != "" {
-		rows = append(rows, []string{a.t(lang, "aprs_raw_packet"), singleLineAPRSDetail(item.Raw)})
+		rows = append(rows,
+			[]string{""},
+			[]string{strings.Repeat("-", panelContentWidth)},
+			[]string{""},
+			[]string{a.t(lang, "aprs_raw_packet"), singleLineAPRSDetail(item.Raw)},
+		)
 	}
 	return rows
 }
