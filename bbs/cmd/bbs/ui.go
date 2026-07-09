@@ -661,13 +661,14 @@ func clearScreen() {
 }
 
 type infoModel struct {
-	app     *app
-	lang    string
-	title   string
-	lines   []string
-	actions []option
-	offset  int
-	chosen  string
+	app          *app
+	lang         string
+	title        string
+	lines        []string
+	actions      []option
+	actionCursor int
+	offset       int
+	chosen       string
 }
 
 func (m infoModel) Init() tea.Cmd { return nil }
@@ -680,12 +681,23 @@ func (m infoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chosen = "q"
 			return m, tea.Quit
 		case "enter":
-			if len(m.actions) == 1 && strings.EqualFold(m.actions[0].label, m.app.t(m.lang, "ok_button")) {
-				m.chosen = m.actions[0].value
+			if len(m.actions) > 0 {
+				if m.actionCursor < 0 || m.actionCursor >= len(m.actions) {
+					m.actionCursor = 0
+				}
+				m.chosen = m.actions[m.actionCursor].value
 			} else {
 				m.chosen = "q"
 			}
 			return m, tea.Quit
+		case "tab", "right", "l":
+			if len(m.actions) > 0 {
+				m.actionCursor = (m.actionCursor + 1) % len(m.actions)
+			}
+		case "shift+tab", "left", "h":
+			if len(m.actions) > 0 {
+				m.actionCursor = (m.actionCursor - 1 + len(m.actions)) % len(m.actions)
+			}
 		case "up", "k":
 			if m.offset > 0 {
 				m.offset--
@@ -741,6 +753,9 @@ func (m infoModel) View() string {
 	if end < len(m.lines) {
 		b.WriteString(dimStyle.Render(m.app.t(m.lang, "info_more_below")) + "\n")
 	}
+	if len(m.actions) > 0 {
+		b.WriteString("\n" + m.renderActions() + "\n")
+	}
 	hint := m.app.t(m.lang, "info_hint_actions")
 	if len(m.actions) > 0 {
 		parts := []string{}
@@ -751,6 +766,20 @@ func (m infoModel) View() string {
 	}
 	b.WriteString("\n" + dimWrapped(hint, panelContentWidth))
 	return panelStyle.Render(b.String())
+}
+
+func (m infoModel) renderActions() string {
+	var b strings.Builder
+	for i, action := range m.actions {
+		text := "[ " + action.label + " ]"
+		if i == m.actionCursor {
+			text = selectedStyle.Render(text)
+		} else {
+			text = titleStyle.Render(text)
+		}
+		b.WriteString(text + "  ")
+	}
+	return b.String()
 }
 
 func (m infoModel) maxOffset() int {
