@@ -144,12 +144,11 @@ The private key you pasted is deliberately not written into tracked files. Put i
 ## APRS Messaging
 
 The APRS menu currently lets each user set `Enable APRS` to `true` or `false`
-through a dialog-style form. The send screen can send APRS messages through
-the upstream [`craigerl/aprsd`](https://github.com/craigerl/aprsd) executable.
-For each send, the BBS uses the logged-in user's callsign with SSID `-0`,
-calculates the APRS-IS passcode automatically, and asks `aprsd` to send the
-message. Messages longer than the APRS message body limit are split into
-numbered parts before sending.
+through a dialog-style form. The send screen sends APRS message packets
+directly to APRS-IS from Go. For each send, the BBS uses the logged-in user's
+callsign with SSID `-0` and calculates the APRS-IS passcode automatically.
+Messages longer than the APRS message body limit are split into numbered parts
+before sending.
 
 Users, bulletins, local boards, threaded messages, and APRS history are stored
 in SQLite through GORM. The default database path is:
@@ -181,16 +180,11 @@ first valid callsign from `BBS_SYSOPS`, then falls back to `N0CALL`. The
 receiver exits once per hour; the supervisor restarts it so the APRS-IS
 connection is refreshed regularly.
 
-Before calling `aprsd`, the BBS checks that the configured APRS-IS server and
-port are reachable. Full `aprsd` command output is appended to
-`/var/lib/bbs/aprs/aprsd.log`. Receiver logs are written to
-`/var/lib/bbs/aprs/receiver.log`.
-
-The stable `aprsd` executable path inside the BBS container is:
-
-```sh
-/opt/aprsd/bin/aprsd
-```
+APRS send attempts, generated packets, APRS-IS login responses, and receiver
+activity are appended to `/var/lib/bbs/aprs/aprs.log`. BBS user and sysop
+activity is appended to `/var/lib/bbs/bbs.log`. The supervisor tails both files
+to Docker logs and rotates both nightly at 03:00 UTC, keeping seven days of
+archives.
 
 Future APRS work can add:
 

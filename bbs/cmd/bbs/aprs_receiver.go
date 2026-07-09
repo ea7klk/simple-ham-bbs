@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -300,15 +298,5 @@ func minDuration(a, b time.Duration) time.Duration {
 
 func (a *app) logAPRSReceiver(format string, args ...any) {
 	text := fmt.Sprintf("%s %s\n", now(), fmt.Sprintf(format, args...))
-	if err := os.MkdirAll(filepath.Dir(a.cfg.aprsReceiverLogFile), 0o755); err == nil {
-		if file, err := os.OpenFile(a.cfg.aprsReceiverLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-			_, _ = file.WriteString(text)
-			_ = file.Close()
-			return
-		}
-	}
-	if err := os.WriteFile("/proc/1/fd/1", []byte(text), 0o600); err == nil {
-		return
-	}
-	_, _ = fmt.Fprint(os.Stderr, text)
+	appendLogFile(a.cfg.aprsLogFile, text)
 }

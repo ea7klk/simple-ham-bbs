@@ -10,7 +10,7 @@ host_key_dir="/config/ssh/host_keys"
 write_bbs_env() {
   mkdir -p /etc/bbs
   {
-    for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_DB_FILE BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRSD_BIN APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY; do
+    for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_DB_FILE BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY; do
       printf '%s=%q\n' "$name" "${!name:-}"
     done
   } > /etc/bbs/bbs.env
@@ -27,6 +27,7 @@ configure_login_password() {
 
 prepare_runtime_dirs() {
   mkdir -p /run/sshd "$data_dir/aprs" /home/bbs/.ssh "$host_key_dir"
+  touch "$data_dir/aprs/aprs.log" "$data_dir/bbs.log"
   chown -R bbs:bbs /home/bbs/.ssh
   chown -R bbs:bbs "$data_dir" || echo "Warning: could not change ownership of $data_dir"
   chmod 700 /home/bbs/.ssh

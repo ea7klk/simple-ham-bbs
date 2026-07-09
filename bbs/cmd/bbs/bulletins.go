@@ -97,6 +97,7 @@ func (a *app) addBulletin(callsign, lang string) {
 	bulletins, _ := a.loadBulletins()
 	bulletins = append(bulletins, bulletin{Title: values["title"], Body: values["body"], Updated: now(), From: callsign})
 	_ = a.saveBulletins(bulletins)
+	a.logBBSAction(callsign, "bulletin_create", "title=%q", values["title"])
 	a.showInfo(lang, a.t(lang, "bulletin_published"), [][]string{{values["title"]}})
 }
 
@@ -116,6 +117,7 @@ func (a *app) editBulletinAt(callsign, lang string, bulletins []bulletin, idx in
 		}
 		bulletins = append(bulletins[:idx], bulletins[idx+1:]...)
 		_ = a.saveBulletins(bulletins)
+		a.logBBSAction(callsign, "bulletin_delete", "title=%q", title)
 		a.showInfo(lang, a.t(lang, "bulletin_deleted"), [][]string{{title}})
 		return
 	}
@@ -125,5 +127,6 @@ func (a *app) editBulletinAt(callsign, lang string, bulletins []bulletin, idx in
 	item.From = callsign
 	bulletins[idx] = item
 	_ = a.saveBulletins(bulletins)
+	a.logBBSAction(callsign, "bulletin_update", "title=%q", item.Title)
 	a.showInfo(lang, a.t(lang, "bulletin_updated"), [][]string{{item.Title}})
 }

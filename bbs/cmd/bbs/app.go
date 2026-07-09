@@ -17,8 +17,8 @@ func newApp() (*app, error) {
 	cfg := config{
 		dataDir:              dataDir,
 		dbFile:               env("BBS_DB_FILE", filepath.Join(dataDir, "bbs.sqlite")),
-		aprsLogFile:          filepath.Join(dataDir, "aprs", "aprsd.log"),
-		aprsReceiverLogFile:  filepath.Join(dataDir, "aprs", "receiver.log"),
+		aprsLogFile:          filepath.Join(dataDir, "aprs", "aprs.log"),
+		bbsLogFile:           filepath.Join(dataDir, "bbs.log"),
 		transFile:            env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
 		name:                 env("BBS_NAME", "HAMNET RADIO BBS"),
 		sysopName:            env("BBS_SYSOP", "Sysop"),
@@ -27,7 +27,6 @@ func newApp() (*app, error) {
 		topic:                env("BBS_WELCOME_TOPIC", "Amateur radio notes, local nets, and packet-era experiments"),
 		aprsServer:           env("APRS_IS_SERVER", "rotate.aprs2.net"),
 		aprsPort:             port,
-		aprsdBin:             env("APRSD_BIN", "/opt/aprsd/bin/aprsd"),
 		aprsReceiverCallsign: env("APRS_RECEIVER_CALLSIGN", ""),
 	}
 	text := map[string]map[string]any{}
@@ -139,6 +138,7 @@ func (a *app) run() error {
 		lang = "en"
 	}
 	a.currentUser = callsign
+	a.logBBSAction(callsign, "login", "sysop=%t", a.isSysop(callsign, profile))
 	for {
 		header := fmt.Sprintf("%s %s", a.t(lang, "logged_in_as"), callsign)
 		if a.isSysop(callsign, profile) {
@@ -180,6 +180,7 @@ func (a *app) run() error {
 				a.sysopMenu(callsign, lang)
 			}
 		case "q":
+			a.logBBSAction(callsign, "logout", "")
 			fmt.Println(a.banner(lang) + a.t(lang, "goodbye"))
 			return nil
 		}

@@ -11,29 +11,29 @@ import (
 )
 
 const (
-	aprsLogRetention       = 7 * 24 * time.Hour
+	logRetention           = 7 * 24 * time.Hour
 	aprsReceiverRetryDelay = 10 * time.Second
 )
 
 var supervisorOutputMu sync.Mutex
 
 func (a *app) runAPRSSupervisor() error {
-	if err := a.ensureAPRSLogFiles(); err != nil {
+	if err := a.ensureRuntimeLogFiles(); err != nil {
 		return err
 	}
 	go tailLogFile(a.cfg.aprsLogFile)
-	go tailLogFile(a.cfg.aprsReceiverLogFile)
-	go a.rotateAPRSLogsNightly()
+	go tailLogFile(a.cfg.bbsLogFile)
+	go a.rotateRuntimeLogsNightly()
 
-	a.logAPRSReceiver("APRS supervisor started; nightly log rotation at 03:00 UTC, retention=7 days")
+	a.logAPRSReceiver("APRS supervisor started; consolidated APRS log=%s; nightly log rotation at 03:00 UTC, retention=7 days", a.cfg.aprsLogFile)
 	return a.watchAPRSReceiver()
 }
 
-func (a *app) ensureAPRSLogFiles() error {
-	if err := os.MkdirAll(filepath.Dir(a.cfg.aprsLogFile), 0o755); err != nil {
-		return err
-	}
-	for _, path := range []string{a.cfg.aprsLogFile, a.cfg.aprsReceiverLogFile} {
+func (a *app) ensureRuntimeLogFiles() error {
+	for _, path := range a.runtimeLogFiles() {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		if err != nil {
 			return err
@@ -41,6 +41,10 @@ func (a *app) ensureAPRSLogFiles() error {
 		_ = file.Close()
 	}
 	return nil
+}
+
+func (a *app) runtimeLogFiles() []string {
+	return []string{a.cfg.aprsLogFile, a.cfg.bbsLogFile}
 }
 
 func (a *app) watchAPRSReceiver() error {
@@ -67,16 +71,16 @@ func (a *app) watchAPRSReceiver() error {
 	}
 }
 
-func (a *app) rotateAPRSLogsNightly() {
+func (a *app) rotateRuntimeLogsNightly() {
 	for {
-		time.Sleep(durationUntilNextAPRSLogRotation(time.Now().UTC()))
-		if err := a.rotateAPRSLogs(time.Now().UTC()); err != nil {
-			a.logAPRSReceiver("APRS log rotation error: %v", err)
+		time.Sleep(durationUntilNextLogRotation(time.Now().UTC()))
+		if err := a.rotateRuntimeLogs(time.Now().UTC()); err != nil {
+			a.logAPRSReceiver("Log rotation error: %v", err)
 		}
 	}
 }
 
-func durationUntilNextAPRSLogRotation(now time.Time) time.Duration {
+func durationUntilNextLogRotation(now time.Time) time.Duration {
 	target := time.Date(now.Year(), now.Month(), now.Day(), 3, 0, 0, 0, time.UTC)
 	if !target.After(now) {
 		target = target.Add(24 * time.Hour)
@@ -88,23 +92,23 @@ func durationUntilNextAPRSLogRotation(now time.Time) time.Duration {
 	return delay
 }
 
-func (a *app) rotateAPRSLogs(now time.Time) error {
-	for _, path := range []string{a.cfg.aprsLogFile, a.cfg.aprsReceiverLogFile} {
-		archive, rotated, err := rotateAPRSLog(path, now)
+func (a *app) rotateRuntimeLogs(now time.Time) error {
+	for _, path := range a.runtimeLogFiles() {
+		archive, rotated, err := rotateLog(path, now)
 		if err != nil {
 			return err
 		}
 		if rotated {
-			a.logAPRSReceiver("Rotated APRS log %s to %s", path, archive)
+			a.logAPRSReceiver("Rotated log %s to %s", path, archive)
 		}
-		if err := removeOldAPRSLogArchives(path, now); err != nil {
+		if err := removeOldLogArchives(path, now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func rotateAPRSLog(path string, now time.Time) (string, bool, error) {
+func rotateLog(path string, now time.Time) (string, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", false, err
 	}
@@ -124,7 +128,7 @@ func rotateAPRSLog(path string, now time.Time) (string, bool, error) {
 	if _, err := active.Seek(0, io.SeekStart); err != nil {
 		return "", false, err
 	}
-	archive := nextAPRSLogArchivePath(path, now)
+	archive := nextLogArchivePath(path, now)
 	out, err := os.OpenFile(archive, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return "", false, err
@@ -145,7 +149,7 @@ func rotateAPRSLog(path string, now time.Time) (string, bool, error) {
 	return archive, true, nil
 }
 
-func nextAPRSLogArchivePath(path string, now time.Time) string {
+func nextLogArchivePath(path string, now time.Time) string {
 	dir := filepath.Dir(path)
 	base := logBase(path)
 	stamp := now.UTC().Format("2006-01-02")
@@ -156,13 +160,13 @@ func nextAPRSLogArchivePath(path string, now time.Time) string {
 	return archive
 }
 
-func removeOldAPRSLogArchives(activePath string, now time.Time) error {
+func removeOldLogArchives(activePath string, now time.Time) error {
 	pattern := filepath.Join(filepath.Dir(activePath), logBase(activePath)+".*.log")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return err
 	}
-	cutoff := now.Add(-aprsLogRetention)
+	cutoff := now.Add(-logRetention)
 	for _, path := range matches {
 		info, err := os.Stat(path)
 		if err != nil {

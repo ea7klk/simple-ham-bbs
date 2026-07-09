@@ -48,7 +48,7 @@ type config struct {
 	dataDir              string
 	dbFile               string
 	aprsLogFile          string
-	aprsReceiverLogFile  string
+	bbsLogFile           string
 	transFile            string
 	name                 string
 	sysopName            string
@@ -57,7 +57,6 @@ type config struct {
 	topic                string
 	aprsServer           string
 	aprsPort             int
-	aprsdBin             string
 	aprsReceiverCallsign string
 }
 
