@@ -1,11 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -79,7 +77,10 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 		action := a.showInfoActions(lang, a.t(lang, "aprs_received_message_detail"), a.aprsReceivedDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"r", a.t(lang, "reply_button")}, {"d", a.t(lang, "delete_button")}})
 		switch action {
 		case "d":
-			_ = a.deleteReceivedRecord(history[idx].ID)
+			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
+				_ = a.deleteReceivedRecord(history[idx].ID)
+				a.logBBSAction(callsign, "aprs_received_delete", "from=%q at=%q", history[idx].From, history[idx].At)
+			}
 		case "r":
 			a.sendAPRSForm(callsign, profile, lang, normalizeAPRSCallsign(history[idx].From))
 		}
@@ -109,7 +110,6 @@ func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destinati
 		}
 		a.showSendingAPRS(lang, values["destination"])
 		sent, okSend := a.sendAPRSMessage(callsign, values["destination"], values["text"], lang)
-		_ = a.addSent(callsign, sent)
 		if !okSend {
 			detail := ""
 			if len(sent.Parts) > 0 {
@@ -118,9 +118,14 @@ func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destinati
 			if detail == "" {
 				detail = sent.Status
 			}
-			a.showInfoActions(lang, a.t(lang, "aprs_send_failed"), [][]string{{detail}}, []option{{"o", a.t(lang, "ok_button")}})
-			continue
+			action := a.showInfoActions(lang, a.t(lang, "aprs_send_failed"), [][]string{{detail}, {a.t(lang, "aprs_retry_prompt")}}, []option{{"r", a.t(lang, "retry_button")}, {"q", a.t(lang, "cancel_button")}})
+			if action == "r" {
+				continue
+			}
+			return false
 		}
+		_ = a.addSent(callsign, sent)
+		a.logBBSAction(callsign, "aprs_send", "to=%q parts=%d", sent.To, len(sent.Parts))
 		a.showInfoActions(lang, a.t(lang, "aprs_send_success"), a.aprsSentResultRows(lang, sent), []option{{"o", a.t(lang, "ok_button")}})
 		return true
 	}
@@ -153,7 +158,10 @@ func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
 		}
 		action := a.showInfoActions(lang, a.t(lang, "aprs_sent_message_detail"), a.aprsSentDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
 		if action == "d" {
-			_ = a.deleteSentRecord(history[idx].ID)
+			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
+				_ = a.deleteSentRecord(history[idx].ID)
+				a.logBBSAction(callsign, "aprs_sent_delete", "to=%q at=%q", history[idx].To, history[idx].At)
+			}
 		}
 	}
 }
@@ -440,32 +448,11 @@ func (a *app) sendAPRSMessage(source, destination, text, lang string) (sentAPRS,
 	passcode := aprsPasscode(from)
 	parts := splitAPRSMessage(text)
 	sent := sentAPRS{At: now(), From: from, To: to, Text: cleanAPRSBody(text), Status: aprsStatusSent, Passcode: passcode}
-	if err := a.checkAPRSReachable(); err != nil {
-		sent.Status = aprsStatusFailed
-		sent.Parts = []sentAPRSPart{{Number: 1, Text: sent.Text, Status: sent.Status, Detail: err.Error()}}
-		a.logAPRSDResult(from, to, sent.Text, nil, err)
-		return sent, false
-	}
-	configPath, cleanup, err := a.writeAPRSDConfig(from, passcode)
-	if err != nil {
-		sent.Status = aprsStatusFailed
-		sent.Parts = []sentAPRSPart{{Number: 1, Text: sent.Text, Status: sent.Status, Detail: err.Error()}}
-		return sent, false
-	}
-	defer cleanup()
-	allOK := true
-	for i, part := range parts {
-		status := aprsStatusSent
-		detail := ""
-		if err := a.runAPRSDMessage(configPath, from, passcode, to, part); err != nil {
-			status = aprsStatusFailed
-			detail = err.Error()
-			allOK = false
-		}
-		sent.Parts = append(sent.Parts, sentAPRSPart{Number: i + 1, Text: part, Status: status, Detail: detail})
-		if !allOK {
-			break
-		}
+	sentParts, allOK := a.sendAPRSParts(from, passcode, to, parts)
+	sent.Parts = sentParts
+	if len(sent.Parts) == 0 {
+		sent.Parts = []sentAPRSPart{{Number: 1, Text: sent.Text, Status: aprsStatusFailed, Detail: "APRS-IS sender returned no part status"}}
+		allOK = false
 	}
 	if !allOK {
 		sent.Status = aprsStatusFailed
@@ -495,96 +482,103 @@ func normalizeAPRSStatus(status string) string {
 	}
 }
 
-func (a *app) writeAPRSDConfig(source string, passcode int) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "hamnet-bbs-aprsd-")
+func (a *app) sendAPRSParts(source string, passcode int, destination string, parts []string) ([]sentAPRSPart, bool) {
+	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
+	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
-		return "", func() {}, err
+		detail := fmt.Sprintf("APRS-IS unreachable at %s: %v", address, err)
+		a.logAPRSSendResult(source, destination, "", "", detail, err)
+		return []sentAPRSPart{{Number: 1, Status: aprsStatusFailed, Detail: detail}}, false
 	}
-	path := filepath.Join(dir, "aprsd.conf")
-	config := fmt.Sprintf(`[DEFAULT]
-callsign = %s
-owner_callsign = %s
-enable_save = false
-enable_beacon = false
-enabled_plugins =
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30*time.Second + time.Duration(len(parts))*3*time.Second))
 
-[aprs_network]
-enabled = true
-password = %d
-host = %s
-port = %d
-`, source, aprsBaseCallsign(source), passcode, a.cfg.aprsServer, a.cfg.aprsPort)
-	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
-		_ = os.RemoveAll(dir)
-		return "", func() {}, err
+	reader := bufio.NewReader(conn)
+	loginLine := fmt.Sprintf("user %s pass %d vers HamNetBBS 0.1\r\n", source, passcode)
+	if _, err := conn.Write([]byte(loginLine)); err != nil {
+		a.logAPRSSendResult(source, destination, "", "", "", err)
+		return []sentAPRSPart{{Number: 1, Status: aprsStatusFailed, Detail: err.Error()}}, false
 	}
-	return path, func() { _ = os.RemoveAll(dir) }, nil
+	response, err := readAPRSISLoginResponse(reader)
+	if err != nil {
+		a.logAPRSSendResult(source, destination, "", "", response, err)
+		return []sentAPRSPart{{Number: 1, Status: aprsStatusFailed, Detail: err.Error()}}, false
+	}
+
+	out := make([]sentAPRSPart, 0, len(parts))
+	allOK := true
+	for i, part := range parts {
+		packet := formatAPRSMessagePacket(source, destination, part)
+		status := aprsStatusSent
+		detail := response
+		err := writeAPRSISPacket(conn, packet)
+		if err != nil {
+			status = aprsStatusFailed
+			detail = err.Error()
+			allOK = false
+		}
+		a.logAPRSSendResult(source, destination, part, packet, response, err)
+		out = append(out, sentAPRSPart{Number: i + 1, Text: part, Status: status, Detail: detail})
+		if !allOK {
+			break
+		}
+		if i < len(parts)-1 {
+			time.Sleep(750 * time.Millisecond)
+		}
+	}
+	return out, allOK
 }
 
-func (a *app) runAPRSDMessage(configPath, source string, passcode int, destination, text string) error {
-	if !exists(a.cfg.aprsdBin) {
-		err := fmt.Errorf("%s: %s", a.t("en", "aprsd_missing"), a.cfg.aprsdBin)
-		a.logAPRSDResult(source, destination, text, nil, err)
-		return err
+func readAPRSISLoginResponse(reader *bufio.Reader) (string, error) {
+	lines := []string{}
+	for i := 0; i < 8; i++ {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return strings.Join(lines, ""), err
+		}
+		lines = append(lines, line)
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "logresp") {
+			response := strings.Join(lines, "")
+			if strings.Contains(lower, "unverified") || strings.Contains(lower, "invalid") {
+				return response, fmt.Errorf("APRS-IS login failed: %s", strings.TrimSpace(line))
+			}
+			return response, nil
+		}
 	}
-	cmd := exec.Command(
-		a.cfg.aprsdBin,
-		"send-message",
-		"--config", configPath,
-		"--aprs-login", source,
-		"--aprs-password", fmt.Sprintf("%d", passcode),
-		"--no-ack",
-		"--loglevel", "debug",
-		destination,
-		text,
-	)
-	output, err := cmd.CombinedOutput()
-	a.logAPRSDResult(source, destination, text, output, err)
-	if err != nil {
-		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
+	response := strings.Join(lines, "")
+	return response, fmt.Errorf("APRS-IS login response did not include logresp")
 }
 
-func (a *app) logAPRSDResult(source, destination, text string, output []byte, err error) {
+func writeAPRSISPacket(conn net.Conn, packet string) error {
+	_, err := fmt.Fprintf(conn, "%s\r\n", packet)
+	return err
+}
+
+func formatAPRSMessagePacket(source, destination, text string) string {
+	return fmt.Sprintf("%s>APRS,TCPIP*::%-9s:%s", normalizeAPRSCallsign(source), normalizeAPRSCallsign(destination), text)
+}
+
+func (a *app) logAPRSSendResult(source, destination, text, packet, response string, err error) {
 	status := "ok"
 	if err != nil {
 		status = "error: " + err.Error()
 	}
-	body := strings.TrimRight(string(output), "\r\n")
+	body := strings.TrimRight(response, "\r\n")
 	if body == "" {
-		body = "<no aprsd output>"
+		body = "<no APRS-IS response>"
 	}
 	logText := fmt.Sprintf(
-		"%s APRSD send-message from=%s to=%s status=%s\nmessage=%s\naprsd-output-begin\n%s\naprsd-output-end\n",
+		"%s APRS-IS send-message from=%s to=%s status=%s\nmessage=%s\npacket=%s\naprs-is-response-begin\n%s\naprs-is-response-end\n",
 		now(),
 		source,
 		destination,
 		status,
 		text,
+		packet,
 		body,
 	)
-	if err := os.MkdirAll(filepath.Dir(a.cfg.aprsLogFile), 0o755); err == nil {
-		if file, err := os.OpenFile(a.cfg.aprsLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-			_, _ = file.WriteString(logText)
-			_ = file.Close()
-			return
-		}
-	}
-	if err := os.WriteFile("/proc/1/fd/1", []byte(logText), 0o600); err == nil {
-		return
-	}
-	_, _ = fmt.Fprint(os.Stderr, logText)
-}
-
-func (a *app) checkAPRSReachable() error {
-	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
-	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("APRS-IS unreachable at %s: %w", address, err)
-	}
-	_ = conn.Close()
-	return nil
+	appendLogFile(a.cfg.aprsLogFile, logText)
 }
 
 func aprsPasscode(callsign string) int {

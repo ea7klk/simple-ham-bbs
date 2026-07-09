@@ -39,6 +39,14 @@ func TestSplitAPRSMessage(t *testing.T) {
 	}
 }
 
+func TestFormatAPRSMessagePacket(t *testing.T) {
+	got := formatAPRSMessagePacket("ea7klk-0", "ea1abc", "Hello")
+	want := "EA7KLK-0>APRS,TCPIP*::EA1ABC   :Hello"
+	if got != want {
+		t.Fatalf("formatAPRSMessagePacket() = %q, want %q", got, want)
+	}
+}
+
 func TestParseAPRSMessageLine(t *testing.T) {
 	msg, ok := parseAPRSMessageLine("EA1ABC-7>APRS,TCPIP*,qAC,T2TEST::EA7KLK-0 :Hello from APRS{42")
 	if !ok {

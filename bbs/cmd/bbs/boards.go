@@ -177,6 +177,7 @@ func (a *app) postMessageToBoard(callsign, lang string, data *boardsData, boardI
 		data.Boards[boardIdx].Messages = data.Boards[boardIdx].Messages[len(data.Boards[boardIdx].Messages)-500:]
 	}
 	_ = a.saveBoards(*data)
+	a.logBBSAction(callsign, "message_post", "board=%q subject=%q", data.Boards[boardIdx].Name, values["subject"])
 	a.showInfo(lang, a.t(lang, "message_posted"), [][]string{{values["subject"]}})
 	return true
 }
@@ -210,6 +211,7 @@ func (a *app) replyToMessage(callsign, lang string, data *boardsData, boardIdx i
 		return false
 	}
 	_ = a.saveBoards(*data)
+	a.logBBSAction(callsign, "message_reply", "board=%q subject=%q", data.Boards[boardIdx].Name, values["subject"])
 	a.showInfo(lang, a.t(lang, "message_reply_posted"), [][]string{{values["subject"]}})
 	return true
 }

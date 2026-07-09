@@ -7,18 +7,7 @@ RUN go mod download
 COPY cmd ./cmd
 RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/bbs_app ./cmd/bbs
 
-FROM python:3.12-alpine AS aprsd
-
-RUN apk add --no-cache git
-
-RUN python -m venv /opt/aprsd \
-    && /opt/aprsd/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/aprsd/bin/pip install --no-cache-dir git+https://github.com/craigerl/aprsd.git
-
-FROM python:3.12-alpine
-
-ENV APRSD_BIN=/opt/aprsd/bin/aprsd
-ENV PATH="/opt/aprsd/bin:${PATH}"
+FROM alpine:3.20
 
 RUN apk add --no-cache bash ca-certificates iproute2 openssh-server sqlite tini
 
@@ -30,7 +19,6 @@ RUN addgroup -S bbs \
 
 COPY sshd_config /etc/ssh/sshd_config
 COPY --from=build /out/bbs_app /usr/local/bin/bbs_app
-COPY --from=aprsd /opt/aprsd /opt/aprsd
 COPY translations.json /usr/local/bin/translations.json
 COPY bbs_session.sh /usr/local/bin/bbs_session.sh
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

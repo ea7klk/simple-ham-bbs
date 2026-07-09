@@ -144,12 +144,11 @@ The private key you pasted is deliberately not written into tracked files. Put i
 ## APRS Messaging
 
 The APRS menu currently lets each user set `Enable APRS` to `true` or `false`
-through a dialog-style form. The send screen can send APRS messages through
-the upstream [`craigerl/aprsd`](https://github.com/craigerl/aprsd) executable.
-For each send, the BBS uses the logged-in user's callsign with SSID `-0`,
-calculates the APRS-IS passcode automatically, and asks `aprsd` to send the
-message. Messages longer than the APRS message body limit are split into
-numbered parts before sending.
+through a dialog-style form. The send screen sends APRS message packets
+directly to APRS-IS from Go. For each send, the BBS uses the logged-in user's
+callsign with SSID `-0` and calculates the APRS-IS passcode automatically.
+Messages longer than the APRS message body limit are split into numbered parts
+before sending.
 
 Users, bulletins, local boards, threaded messages, and APRS history are stored
 in SQLite through GORM. The default database path is:
@@ -158,40 +157,34 @@ in SQLite through GORM. The default database path is:
 /var/lib/bbs/bbs.sqlite
 ```
 
-On startup, existing JSON data files under `/var/lib/bbs` are imported into the
-database once. The old direct-sender APRS store `/var/lib/bbs/aprs/sent.json`
-is removed on startup.
+The latest 200 sent APRS messages and 500 received APRS messages per BBS user
+are retained in the database.
 
-The latest 10 sent APRS messages per user are retained in the database.
-
-The container also starts a persistent APRS receiver process:
+The container also starts an APRS supervisor helper:
 
 ```sh
-/usr/local/bin/bbs_app aprs-receiver
+/usr/local/bin/bbs_app aprs-supervisor
 ```
 
-It connects to APRS-IS with `filter t/m`, listens for APRS message packets, and
-stores messages addressed to BBS users who have `Enable APRS` set to `true`.
-Received messages are stored per callsign in the database and are shown under
-`Received APRS messages` in the APRS menu. APRS message IDs appended by senders, such as `{2044`, are
-removed from the user-facing message text before storage/display, while the raw
-packet field is preserved as received. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
+The supervisor tails APRS logs into `docker-compose logs bbs`, rotates those
+logs nightly at 03:00 UTC, keeps rotated logs for seven days, and watches the
+APRS receiver process. The receiver connects to APRS-IS with `filter t/m`,
+listens for APRS message packets, and stores messages addressed to BBS users
+who have `Enable APRS` set to `true`. Received messages are stored per callsign
+in the database and are shown under `Received APRS messages` in the APRS menu.
+APRS message IDs appended by senders, such as `{2044`, are removed from the
+user-facing message text before storage/display, while the raw packet field is
+preserved as received. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
 receive-only APRS-IS login callsign; if it is empty, the receiver uses the
-first valid callsign from `BBS_SYSOPS`, then falls back to `N0CALL`.
-The receiver exits once per hour; the container entrypoint immediately restarts
-it so the APRS-IS connection is refreshed regularly.
+first valid callsign from `BBS_SYSOPS`, then falls back to `N0CALL`. The
+receiver exits once per hour; the supervisor restarts it so the APRS-IS
+connection is refreshed regularly.
 
-Before calling `aprsd`, the BBS checks that the configured APRS-IS server and
-port are reachable. Full `aprsd` command output is appended to
-`/var/lib/bbs/aprs/aprsd.log`, which is tailed into `docker-compose logs bbs`.
-Receiver logs are written to `/var/lib/bbs/aprs/receiver.log` and are tailed
-into the same Docker logs.
-
-The stable `aprsd` executable path inside the BBS container is:
-
-```sh
-/opt/aprsd/bin/aprsd
-```
+APRS send attempts, generated packets, APRS-IS login responses, and receiver
+activity are appended to `/var/lib/bbs/aprs/aprs.log`. BBS user and sysop
+activity is appended to `/var/lib/bbs/bbs.log`. The supervisor tails both files
+to Docker logs and rotates both nightly at 03:00 UTC, keeping seven days of
+archives.
 
 Future APRS work can add:
 

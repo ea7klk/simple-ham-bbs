@@ -13,12 +13,11 @@ func (a *app) sysopMenu(callsign, lang string) {
 		choice := a.runMenu(lang, a.t(lang, "sysop_menu_title"), "", []option{
 			{"1", a.t(lang, "sysop_list_users")},
 			{"2", a.t(lang, "sysop_toggle_sysop")},
-			{"3", a.t(lang, "sysop_publish_bulletin")},
-			{"4", a.t(lang, "sysop_edit_bulletin")},
-			{"5", a.t(lang, "sysop_add_board")},
-			{"6", a.t(lang, "sysop_delete_board")},
-			{"7", a.t(lang, "sysop_rename_board")},
-			{"8", a.t(lang, "sysop_delete_message")},
+			{"3", a.t(lang, "sysop_manage_bulletins")},
+			{"4", a.t(lang, "sysop_add_board")},
+			{"5", a.t(lang, "sysop_delete_board")},
+			{"6", a.t(lang, "sysop_rename_board")},
+			{"7", a.t(lang, "sysop_delete_message")},
 			{"q", a.t(lang, "menu_quit")},
 		})
 		switch choice {
@@ -27,17 +26,15 @@ func (a *app) sysopMenu(callsign, lang string) {
 		case "2":
 			a.toggleSysop(callsign, lang, users)
 		case "3":
-			a.publishBulletin(callsign, lang)
+			a.manageBulletins(callsign, lang)
 		case "4":
-			a.editBulletin(callsign, lang)
+			a.addBoard(callsign, lang)
 		case "5":
-			a.addBoard(lang)
+			a.deleteBoard(callsign, lang)
 		case "6":
-			a.deleteBoard(lang)
+			a.renameBoard(callsign, lang)
 		case "7":
-			a.renameBoard(lang)
-		case "8":
-			a.editBoardMessage(lang)
+			a.editBoardMessage(callsign, lang)
 		case "q":
 			return
 		}
@@ -149,6 +146,7 @@ func (a *app) editUserDetail(current, lang string, users map[string]userProfile,
 	}
 	users[target] = updated
 	_ = a.saveUsers(users)
+	a.logBBSAction(current, "user_update", "target=%q disabled=%t", target, updated.Disabled)
 	a.showInfo(lang, a.t(lang, "user_updated"), userDetailRows(a, lang, target, updated, a.isSysop(target, updated)))
 }
 
@@ -196,13 +194,13 @@ func (a *app) confirmAndDeleteUser(current, lang string, users map[string]userPr
 		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
 		return
 	}
-	action, _, ok := a.runForm(lang, fmt.Sprintf(a.t(lang, "confirm_delete_user"), target), nil, []string{"no", "yes"})
-	if !ok || action != "yes" {
+	if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_user"), target)) {
 		return
 	}
 	delete(users, target)
 	_ = a.deleteUserAPRSHistory(target)
 	_ = a.saveUsers(users)
+	a.logBBSAction(current, "user_delete", "target=%q", target)
 	a.showInfo(lang, a.t(lang, "user_deleted"), [][]string{{target}})
 }
 
@@ -265,9 +263,10 @@ func (a *app) toggleSysop(current, lang string, users map[string]userProfile) {
 	}
 	users[target] = p
 	_ = a.saveUsers(users)
+	a.logBBSAction(current, "sysop_toggle", "target=%q enabled=%t", target, p.IsSysop)
 }
 
-func (a *app) addBoard(lang string) {
+func (a *app) addBoard(callsign, lang string) {
 	data, _ := a.loadBoards()
 	_, values, ok := a.runForm(lang, a.t(lang, "board_form_title"), []formField{{name: "name", label: a.t(lang, "board_name"), required: true, limit: 60}, {name: "description", label: a.t(lang, "board_description"), limit: 120}}, []string{"save", "cancel"})
 	if !ok {
@@ -282,19 +281,29 @@ func (a *app) addBoard(lang string) {
 	}
 	data.Boards = append(data.Boards, board{ID: id, Name: values["name"], Description: values["description"], Created: now()})
 	_ = a.saveBoards(data)
+	a.logBBSAction(callsign, "board_create", "board=%q", values["name"])
 }
 
-func (a *app) deleteBoard(lang string) {
+func (a *app) deleteBoard(callsign, lang string) {
 	data, _ := a.loadBoards()
 	idx, ok := a.selectBoard(lang, data, "select_board_delete")
-	if !ok || len(data.Boards) <= 1 {
+	if !ok {
 		return
 	}
+	if len(data.Boards) <= 1 {
+		a.showInfo(lang, a.t(lang, "sysop_delete_board"), [][]string{{a.t(lang, "cannot_delete_last_board")}})
+		return
+	}
+	if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_board"), data.Boards[idx].Name)) {
+		return
+	}
+	name := data.Boards[idx].Name
 	data.Boards = append(data.Boards[:idx], data.Boards[idx+1:]...)
 	_ = a.saveBoards(data)
+	a.logBBSAction(callsign, "board_delete", "board=%q", name)
 }
 
-func (a *app) renameBoard(lang string) {
+func (a *app) renameBoard(callsign, lang string) {
 	data, _ := a.loadBoards()
 	idx, ok := a.selectBoard(lang, data, "select_board_rename")
 	if !ok {
@@ -311,11 +320,13 @@ func (a *app) renameBoard(lang string) {
 			return
 		}
 	}
+	oldName := data.Boards[idx].Name
 	data.Boards[idx].Name, data.Boards[idx].ID = values["name"], id
 	_ = a.saveBoards(data)
+	a.logBBSAction(callsign, "board_rename", "from=%q to=%q", oldName, values["name"])
 }
 
-func (a *app) editBoardMessage(lang string) {
+func (a *app) editBoardMessage(callsign, lang string) {
 	data, _ := a.loadBoards()
 	idx, ok := a.selectBoard(lang, data, "select_board_message_delete")
 	if !ok || len(data.Boards[idx].Messages) == 0 {
@@ -348,12 +359,24 @@ func (a *app) editBoardMessage(lang string) {
 	if !ok && action != "delete" {
 		return
 	}
+	logAction := ""
+	logDetail := ""
 	if action == "delete" {
+		if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_message"), msg.Subject)) {
+			return
+		}
 		if messages, deleted := deleteMessageAtPath(data.Boards[idx].Messages, path); deleted {
 			data.Boards[idx].Messages = messages
+			logAction = "message_delete"
+			logDetail = fmt.Sprintf("board=%q subject=%q", data.Boards[idx].Name, msg.Subject)
 		}
 	} else {
 		msg.Subject, msg.Body, msg.Edited = values["subject"], values["body"], now()
+		logAction = "message_edit"
+		logDetail = fmt.Sprintf("board=%q subject=%q", data.Boards[idx].Name, msg.Subject)
 	}
 	_ = a.saveBoards(data)
+	if logAction != "" {
+		a.logBBSAction(callsign, logAction, logDetail)
+	}
 }
