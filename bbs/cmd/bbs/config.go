@@ -26,7 +26,7 @@ const (
 
 var (
 	callsignRE     = regexp.MustCompile(`^[A-Z0-9][A-Z0-9/-]{2,15}$`)
-	aprsCallsignRE = regexp.MustCompile(`^[A-Z0-9]{1,6}(-[0-9]{1,2})?$`)
+	aprsCallsignRE = regexp.MustCompile(`^[A-Z0-9]{1,10}(-[0-9]{1,2})?$`)
 	emailRE        = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 	maidenheadRE   = regexp.MustCompile(`^[A-Ra-r]{2}([0-9]{2}([A-Xa-x]{2}([0-9]{2}([A-Xa-x]{2})?)?)?)?$`)
 	boardIDRE      = regexp.MustCompile(`[^a-z0-9]+`)

@@ -206,6 +206,8 @@ type formField struct {
 	value       string
 	required    bool
 	limit       int
+	width       int
+	sameLine    bool
 	choices     []option
 	input       textinput.Model
 	area        textarea.Model
@@ -428,6 +430,15 @@ func (m formModel) View() string {
 		b.WriteString(dimStyle.Render(m.app.t(m.lang, "form_more_fields_above")) + "\n")
 	}
 	for i := start; i < end; i++ {
+		if m.fields[i].sameLine {
+			groupEnd := i + 1
+			for groupEnd < end && m.fields[groupEnd].sameLine {
+				groupEnd++
+			}
+			b.WriteString(m.renderInlineFields(i, groupEnd))
+			i = groupEnd - 1
+			continue
+		}
 		b.WriteString(m.renderField(i))
 	}
 	if end < len(m.fields) {
@@ -479,6 +490,9 @@ func (m formModel) renderField(i int) string {
 	switch f.kind {
 	case fieldText, fieldPassword:
 		fieldWidth := panelContentWidth - lipgloss.Width(labelText) - 10
+		if f.width > 0 {
+			fieldWidth = f.width
+		}
 		if fieldWidth > 34 {
 			fieldWidth = 34
 		}
@@ -500,6 +514,33 @@ func (m formModel) renderField(i int) string {
 		}
 		b.WriteString("\n")
 	}
+	return b.String()
+}
+
+func (m formModel) renderInlineFields(start, end int) string {
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		f := &m.fields[i]
+		labelText := strings.TrimSpace(f.label)
+		if f.required {
+			labelText += " *"
+		}
+		label := labelText
+		if i == m.focus {
+			label = selectedStyle.Render(label)
+		} else {
+			label = titleStyle.Render(label)
+		}
+		fieldWidth := f.width
+		if fieldWidth <= 0 {
+			fieldWidth = 12
+		}
+		b.WriteString(label + " " + m.renderSingleLineField(f, i == m.focus, fieldWidth))
+		if i < end-1 {
+			b.WriteString("  ")
+		}
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 
