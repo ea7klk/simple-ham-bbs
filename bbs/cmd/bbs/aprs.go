@@ -96,20 +96,24 @@ func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
 }
 
 func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destination string) bool {
+	destCall, destSSID := splitAPRSDestination(destination)
 	for {
 		if !profile.EnableAPRS {
 			a.showInfo(lang, a.t(lang, "aprs_send_message"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return false
 		}
 		action, values, ok := a.runForm(lang, a.t(lang, "aprs_send_message"), []formField{
-			{name: "destination", label: a.t(lang, "aprs_destination_callsign"), value: destination, required: true, limit: 9, normalizer: normalizeAPRSCallsign, validator: validAPRSCallsign, invalidText: a.t(lang, "aprs_invalid_destination")},
+			{name: "destination", label: a.t(lang, "aprs_destination_callsign"), value: destCall, required: true, limit: 10, width: 10, sameLine: true, normalizer: normalizeAPRSCallsign, validator: validAPRSBaseCallsign, invalidText: a.t(lang, "aprs_invalid_destination")},
+			{name: "destination_ssid", label: a.t(lang, "aprs_destination_ssid"), value: destSSID, required: true, limit: 2, width: 2, sameLine: true, normalizer: normalizeAPRSSSID, validator: validAPRSSSID, invalidText: a.t(lang, "aprs_invalid_ssid")},
 			{name: "text", label: a.t(lang, "aprs_text"), kind: fieldTextArea, required: true, limit: 2000},
 		}, []string{"send", "cancel"})
 		if !ok || action == "cancel" {
 			return false
 		}
-		a.showSendingAPRS(lang, values["destination"])
-		sent, okSend := a.sendAPRSMessage(callsign, values["destination"], values["text"], lang)
+		destination = composeAPRSDestination(values["destination"], values["destination_ssid"])
+		destCall, destSSID = splitAPRSDestination(destination)
+		a.showSendingAPRS(lang, destination)
+		sent, okSend := a.sendAPRSMessage(callsign, destination, values["text"], lang)
 		if !okSend {
 			detail := ""
 			if len(sent.Parts) > 0 {
@@ -248,7 +252,12 @@ func (a *app) aprsReceivedDetailRows(lang string, item receivedAPRS) [][]string 
 		{a.t(lang, "aprs_text"), singleLineAPRSDetail(stripAPRSMessageID(item.Text))},
 	}
 	if item.Raw != "" {
-		rows = append(rows, []string{a.t(lang, "aprs_raw_packet"), singleLineAPRSDetail(item.Raw)})
+		rows = append(rows,
+			[]string{""},
+			[]string{strings.Repeat("-", panelContentWidth)},
+			[]string{""},
+			[]string{a.t(lang, "aprs_raw_packet"), singleLineAPRSDetail(item.Raw)},
+		)
 	}
 	return rows
 }
@@ -658,4 +667,45 @@ func normalizeAPRSCallsign(callsign string) string {
 
 func validAPRSCallsign(callsign string) bool {
 	return aprsCallsignRE.MatchString(normalizeAPRSCallsign(callsign))
+}
+
+func validAPRSBaseCallsign(callsign string) bool {
+	value := normalizeAPRSCallsign(callsign)
+	return value != "" && !strings.Contains(value, "-") && aprsCallsignRE.MatchString(value+"-0")
+}
+
+func normalizeAPRSSSID(ssid string) string {
+	ssid = strings.TrimSpace(ssid)
+	if ssid == "" {
+		return "0"
+	}
+	return ssid
+}
+
+func validAPRSSSID(ssid string) bool {
+	if ssid == "" || len(ssid) > 2 {
+		return false
+	}
+	for _, r := range ssid {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func splitAPRSDestination(destination string) (string, string) {
+	value := normalizeAPRSCallsign(destination)
+	if value == "" {
+		return "", "0"
+	}
+	parts := strings.SplitN(value, "-", 2)
+	if len(parts) == 1 {
+		return parts[0], "0"
+	}
+	return parts[0], normalizeAPRSSSID(parts[1])
+}
+
+func composeAPRSDestination(callsign, ssid string) string {
+	return fmt.Sprintf("%s-%s", normalizeAPRSCallsign(callsign), normalizeAPRSSSID(ssid))
 }
