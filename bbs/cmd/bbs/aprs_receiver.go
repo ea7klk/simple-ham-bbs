@@ -12,6 +12,12 @@ import (
 
 var aprsMultipartRE = regexp.MustCompile(`^\[([0-9]+)/([0-9]+)\]\s*(.*)$`)
 
+type parsedAPRSPacket struct {
+	Message receivedAPRS
+	AckID   string
+	RejID   string
+}
+
 type aprsMultipartBuffer struct {
 	From     string
 	To       string
@@ -84,9 +90,37 @@ func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) e
 			a.logAPRSReceiver("APRS-IS: %s", line)
 			continue
 		}
-		msg, ok := parseAPRSMessageLine(line)
+		packet, ok := parseAPRSMessagePacket(line)
 		if !ok {
 			continue
+		}
+		if packet.AckID != "" {
+			matched, err := a.markSentAPRSAck(packet.Message.From, packet.Message.To, packet.AckID)
+			if err != nil {
+				a.logAPRSReceiver("APRS ack update error from=%s to=%s id=%s: %v", packet.Message.From, packet.Message.To, packet.AckID, err)
+				continue
+			}
+			a.logAPRSReceiver("APRS ack received from=%s to=%s id=%s matched=%t", packet.Message.From, packet.Message.To, packet.AckID, matched)
+			a.logBBSAction(aprsRecipientKey(packet.Message.To), "aprs_ack_received", "from=%q to=%q id=%q matched=%t", packet.Message.From, packet.Message.To, packet.AckID, matched)
+			continue
+		}
+		if packet.RejID != "" {
+			a.logAPRSReceiver("APRS rejection received from=%s to=%s id=%s", packet.Message.From, packet.Message.To, packet.RejID)
+			continue
+		}
+		msg := packet.Message
+		if msg.MessageID != "" {
+			user, enabled, err := a.aprsRecipientEnabled(msg.To)
+			if err != nil {
+				a.logAPRSReceiver("APRS ack eligibility error to=%s id=%s: %v", msg.To, msg.MessageID, err)
+			} else if enabled {
+				if err := sendAPRSAck(conn, msg.To, msg.From, msg.MessageID); err != nil {
+					a.logAPRSReceiver("APRS ack send error user=%s from=%s to=%s id=%s: %v", user, msg.To, msg.From, msg.MessageID, err)
+				} else {
+					a.logAPRSReceiver("APRS ack sent user=%s from=%s to=%s id=%s", user, msg.To, msg.From, msg.MessageID)
+					a.logBBSAction(user, "aprs_ack_sent", "from=%q to=%q id=%q", msg.To, msg.From, msg.MessageID)
+				}
+			}
 		}
 		ready, waiting := collectAPRSMessagePart(multipart, msg)
 		if waiting {
@@ -177,26 +211,45 @@ func pruneAPRSMessageParts(buffers map[string]*aprsMultipartBuffer, maxAge time.
 }
 
 func parseAPRSMessageLine(raw string) (receivedAPRS, bool) {
+	packet, ok := parseAPRSMessagePacket(raw)
+	if !ok || packet.AckID != "" || packet.RejID != "" {
+		return receivedAPRS{}, false
+	}
+	return packet.Message, true
+}
+
+func parseAPRSMessagePacket(raw string) (parsedAPRSPacket, bool) {
 	header, info, ok := strings.Cut(raw, ":")
 	if !ok || !strings.HasPrefix(info, ":") || len(info) < 11 || info[10] != ':' {
-		return receivedAPRS{}, false
+		return parsedAPRSPacket{}, false
 	}
 	source, _, ok := strings.Cut(header, ">")
 	if !ok {
-		return receivedAPRS{}, false
+		return parsedAPRSPacket{}, false
 	}
 	to := strings.TrimSpace(info[1:10])
-	text := stripAPRSMessageID(info[11:])
-	if to == "" || text == "" || isAPRSAckMessage(text) {
-		return receivedAPRS{}, false
+	text := strings.TrimSpace(info[11:])
+	if to == "" || text == "" {
+		return parsedAPRSPacket{}, false
 	}
-	return receivedAPRS{
+	msg := receivedAPRS{
 		At:   now(),
 		From: normalizeAPRSCallsign(source),
 		To:   normalizeAPRSCallsign(to),
-		Text: text,
+		Text: stripAPRSMessageID(text),
 		Raw:  raw,
-	}, true
+	}
+	if ackID, ok := aprsResponseID(text, "ack"); ok {
+		return parsedAPRSPacket{Message: msg, AckID: ackID}, true
+	}
+	if rejID, ok := aprsResponseID(text, "rej"); ok {
+		return parsedAPRSPacket{Message: msg, RejID: rejID}, true
+	}
+	msg.Text, msg.MessageID = splitAPRSMessageID(text)
+	if msg.Text == "" {
+		return parsedAPRSPacket{}, false
+	}
+	return parsedAPRSPacket{Message: msg}, true
 }
 
 func (a *app) storeReceivedAPRS(msg receivedAPRS) (string, bool, error) {
@@ -226,9 +279,40 @@ func (a *app) storeReceivedAPRS(msg receivedAPRS) (string, bool, error) {
 	return key, err == nil, err
 }
 
+func (a *app) aprsRecipientEnabled(to string) (string, bool, error) {
+	users, err := a.loadUsers()
+	if err != nil {
+		return "", false, err
+	}
+	key := aprsRecipientKey(to)
+	profile, ok := users[key]
+	return key, ok && !profile.Disabled && profile.EnableAPRS, nil
+}
+
+func sendAPRSAck(conn net.Conn, source, destination, messageID string) error {
+	return writeAPRSISPacket(conn, formatAPRSAckPacket(source, destination, messageID))
+}
+
 func isAPRSAckMessage(text string) bool {
 	text = strings.ToLower(strings.TrimSpace(stripAPRSMessageID(text)))
 	return isAPRSResponseToken(text, "ack") || isAPRSResponseToken(text, "rej")
+}
+
+func aprsResponseID(text, prefix string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if body, _, ok := strings.Cut(text, "{"); ok {
+		text = body
+	}
+	suffix, ok := strings.CutPrefix(strings.ToLower(text), prefix)
+	if !ok || suffix == "" || len([]rune(suffix)) > 5 {
+		return "", false
+	}
+	for _, r := range suffix {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'z') {
+			return "", false
+		}
+	}
+	return normalizeAPRSMessageID(suffix), true
 }
 
 func isAPRSResponseToken(text, prefix string) bool {
@@ -268,25 +352,30 @@ func aprsRecipientKey(to string) string {
 }
 
 func stripAPRSMessageID(text string) string {
+	body, _ := splitAPRSMessageID(text)
+	return body
+}
+
+func splitAPRSMessageID(text string) (string, string) {
 	text = strings.TrimSpace(text)
 	idx := strings.LastIndex(text, "{")
 	if idx < 0 {
-		return text
+		return text, ""
 	}
 	id := text[idx+1:]
 	if id == "" || len([]rune(id)) > 5 {
-		return text
+		return text, ""
 	}
 	for _, r := range id {
 		if r < '0' || r > '9' {
 			if r < 'A' || r > 'Z' {
 				if r < 'a' || r > 'z' {
-					return text
+					return text, ""
 				}
 			}
 		}
 	}
-	return strings.TrimSpace(text[:idx])
+	return strings.TrimSpace(text[:idx]), normalizeAPRSMessageID(id)
 }
 
 func minDuration(a, b time.Duration) time.Duration {

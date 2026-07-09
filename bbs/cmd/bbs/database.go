@@ -59,17 +59,20 @@ type dbAPRSSent struct {
 	To           string
 	Text         string
 	Status       string
+	Acked        bool
 	Passcode     int
 	Parts        []dbAPRSSentPart `gorm:"foreignKey:SentID;constraint:OnDelete:CASCADE"`
 }
 
 type dbAPRSSentPart struct {
-	ID     uint `gorm:"primaryKey"`
-	SentID uint `gorm:"index"`
-	Number int
-	Text   string
-	Status string
-	Detail string
+	ID        uint `gorm:"primaryKey"`
+	SentID    uint `gorm:"index"`
+	Number    int
+	Text      string
+	Status    string
+	Detail    string
+	MessageID string `gorm:"index"`
+	Acked     bool
 }
 
 type dbAPRSReceived struct {

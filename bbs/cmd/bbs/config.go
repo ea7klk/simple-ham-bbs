@@ -117,24 +117,28 @@ type sentAPRS struct {
 	To       string         `json:"to"`
 	Text     string         `json:"text"`
 	Status   string         `json:"status"`
+	Acked    bool           `json:"acked,omitempty"`
 	Passcode int            `json:"passcode,omitempty"`
 	Parts    []sentAPRSPart `json:"parts,omitempty"`
 }
 
 type sentAPRSPart struct {
-	Number int    `json:"number"`
-	Text   string `json:"text"`
-	Status string `json:"status"`
-	Detail string `json:"detail,omitempty"`
+	Number    int    `json:"number"`
+	Text      string `json:"text"`
+	Status    string `json:"status"`
+	Detail    string `json:"detail,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	Acked     bool   `json:"acked,omitempty"`
 }
 
 type receivedAPRS struct {
-	ID   uint   `json:"id,omitempty"`
-	At   string `json:"at"`
-	From string `json:"from"`
-	To   string `json:"to"`
-	Text string `json:"text"`
-	Raw  string `json:"raw,omitempty"`
+	ID        uint   `json:"id,omitempty"`
+	At        string `json:"at"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Text      string `json:"text"`
+	Raw       string `json:"raw,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
 }
 
 type option struct {
