@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,6 +46,55 @@ func TestFormatAPRSMessagePacket(t *testing.T) {
 	if got != want {
 		t.Fatalf("formatAPRSMessagePacket() = %q, want %q", got, want)
 	}
+	got = formatAPRSMessagePacket("ea7klk-0", "ea1abc-0", withAPRSMessageID("Hello", "a1"))
+	want = "EA7KLK-0>APRS,TCPIP*::EA1ABC-0 :Hello{A1"
+	if got != want {
+		t.Fatalf("formatAPRSMessagePacket(with id) = %q, want %q", got, want)
+	}
+	if got, want := formatAPRSAckPacket("ea7klk-0", "ea1abc-0", "a1"), "EA7KLK-0>APRS,TCPIP*::EA1ABC-0 :ackA1"; got != want {
+		t.Fatalf("formatAPRSAckPacket() = %q, want %q", got, want)
+	}
+	if got := withAPRSMessageID("Hello", "a1"); got != "Hello{A1" {
+		t.Fatalf("withAPRSMessageID() = %q, want Hello{A1", got)
+	}
+}
+
+func TestMaidenheadCenter(t *testing.T) {
+	lat, lon, err := maidenheadCenter("im77ah")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(lat-37.3125) > 0.000001 {
+		t.Fatalf("maidenheadCenter() lat = %.8f, want 37.3125", lat)
+	}
+	if math.Abs(lon-(-5.9583333333)) > 0.000001 {
+		t.Fatalf("maidenheadCenter() lon = %.8f, want -5.95833333", lon)
+	}
+}
+
+func TestFormatAPRSPositionBeaconPacket(t *testing.T) {
+	got := formatAPRSPosition(37.3125, -5.9583333333, '\\', 'm', "HamNet BBS")
+	want := `!3718.75N\00557.50WmHamNet BBS`
+	if got != want {
+		t.Fatalf("formatAPRSPosition() = %q, want %q", got, want)
+	}
+	got = formatAPRSBeaconPacket("ea7klk-0", 37.3125, -5.9583333333, "HamNet BBS")
+	want = `EA7KLK-0>APRS,TCPIP*:!3718.75N\00557.50WmHamNet BBS`
+	if got != want {
+		t.Fatalf("formatAPRSBeaconPacket() = %q, want %q", got, want)
+	}
+}
+
+func TestComposeAPRSDestinationBlankSSID(t *testing.T) {
+	if got, want := composeAPRSDestination("ea1abc", "0"), "EA1ABC-0"; got != want {
+		t.Fatalf("composeAPRSDestination(default ssid) = %q, want %q", got, want)
+	}
+	if got, want := composeAPRSDestination("ea1abc", ""), "EA1ABC"; got != want {
+		t.Fatalf("composeAPRSDestination(blank ssid) = %q, want %q", got, want)
+	}
+	if call, ssid := splitAPRSDestination("ANSRVR"); call != "ANSRVR" || ssid != "" {
+		t.Fatalf("splitAPRSDestination(ANSRVR) = %q/%q, want ANSRVR/blank", call, ssid)
+	}
 }
 
 func TestParseAPRSMessageLine(t *testing.T) {
@@ -52,7 +102,7 @@ func TestParseAPRSMessageLine(t *testing.T) {
 	if !ok {
 		t.Fatal("parseAPRSMessageLine() did not recognize a message packet")
 	}
-	if msg.From != "EA1ABC-7" || msg.To != "EA7KLK-0" || msg.Text != "Hello from APRS" || !strings.Contains(msg.Raw, "{42") {
+	if msg.From != "EA1ABC-7" || msg.To != "EA7KLK-0" || msg.Text != "Hello from APRS" || msg.MessageID != "42" || !strings.Contains(msg.Raw, "{42") {
 		t.Fatalf("unexpected parsed message: %#v", msg)
 	}
 }
@@ -86,6 +136,10 @@ func TestParseAPRSMessageLineRejectsAckAndRej(t *testing.T) {
 	for _, raw := range cases {
 		if _, ok := parseAPRSMessageLine(raw); ok {
 			t.Fatalf("parseAPRSMessageLine() accepted APRS response packet %q", raw)
+		}
+		packet, ok := parseAPRSMessagePacket(raw)
+		if !ok || packet.AckID == "" && packet.RejID == "" {
+			t.Fatalf("parseAPRSMessagePacket() did not expose APRS response packet %q: %#v ok=%v", raw, packet, ok)
 		}
 	}
 	msg, ok := parseAPRSMessageLine("EA1ABC-7>APRS,TCPIP*,qAC,T2TEST::EA7KLK-0 :acknowledged and copied")
@@ -197,6 +251,50 @@ func TestSentAPRSHistoryLimitAndDelete(t *testing.T) {
 	}
 	if got := len(a.loadSentHistory("EA7KLK")); got != sentHistoryLimit-1 {
 		t.Fatalf("sent history count after delete = %d, want %d", got, sentHistoryLimit-1)
+	}
+}
+
+func TestSentAPRSAckFlow(t *testing.T) {
+	a := testApp(t)
+	_, err := a.addSentRecord("EA7KLK", sentAPRS{
+		At:     now(),
+		From:   "EA7KLK-0",
+		To:     "EA1ABC-0",
+		Text:   "hello",
+		Status: aprsStatusSent,
+		Parts: []sentAPRSPart{
+			{Number: 1, Text: "[1/2] hello ", Status: aprsStatusSent, MessageID: "ID001"},
+			{Number: 2, Text: "[2/2] world", Status: aprsStatusSent, MessageID: "ID002"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := a.loadSentHistory("EA7KLK")
+	if got := sentAckIcon(history[0]); got != "?" {
+		t.Fatalf("initial multipart ack icon = %q, want ?", got)
+	}
+	matched, err := a.markSentAPRSAck("EA1ABC-0", "EA7KLK-0", "ID001")
+	if err != nil || !matched {
+		t.Fatalf("first ack matched=%v err=%v, want matched", matched, err)
+	}
+	history = a.loadSentHistory("EA7KLK")
+	if history[0].Acked || !history[0].Parts[0].Acked || history[0].Parts[1].Acked {
+		t.Fatalf("unexpected partial ack state: %#v", history[0])
+	}
+	if got := sentAckIcon(history[0]); got != "?" {
+		t.Fatalf("partial multipart ack icon = %q, want ?", got)
+	}
+	matched, err = a.markSentAPRSAck("EA1ABC-0", "EA7KLK-0", "ID002")
+	if err != nil || !matched {
+		t.Fatalf("second ack matched=%v err=%v, want matched", matched, err)
+	}
+	history = a.loadSentHistory("EA7KLK")
+	if !history[0].Acked || !history[0].Parts[0].Acked || !history[0].Parts[1].Acked {
+		t.Fatalf("unexpected complete ack state: %#v", history[0])
+	}
+	if got := sentAckIcon(history[0]); got != "✓" {
+		t.Fatalf("complete multipart ack icon = %q, want checkmark", got)
 	}
 }
 

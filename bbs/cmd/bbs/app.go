@@ -139,6 +139,7 @@ func (a *app) run() error {
 	}
 	a.currentUser = callsign
 	a.logBBSAction(callsign, "login", "sysop=%t", a.isSysop(callsign, profile))
+	a.sendLoginAPRSBeacon(callsign, profile)
 	for {
 		header := fmt.Sprintf("%s %s", a.t(lang, "logged_in_as"), callsign)
 		if a.isSysop(callsign, profile) {
