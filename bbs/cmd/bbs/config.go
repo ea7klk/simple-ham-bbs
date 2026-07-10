@@ -61,10 +61,15 @@ type config struct {
 }
 
 type app struct {
-	cfg         config
-	text        map[string]map[string]any
-	db          *gorm.DB
-	currentUser string
+	cfg                 config
+	text                map[string]map[string]any
+	db                  *gorm.DB
+	currentUser         string
+	runMenuHook         func(lang, title, header string, opts []option) string
+	runFormHook         func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool)
+	showInfoHook        func(lang, title string, rows [][]string)
+	showInfoActionsHook func(lang, title string, rows [][]string, actions []option) string
+	confirmDeleteHook   func(lang, prompt string) bool
 }
 
 type userProfile struct {

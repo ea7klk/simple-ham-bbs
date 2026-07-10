@@ -18,6 +18,8 @@ const (
 	aprsBeaconText   = "HamNet BBS"
 )
 
+var netDialTimeout = net.DialTimeout
+
 func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userProfile {
 	users, _ := a.loadUsers()
 	profile = users[callsign]
@@ -624,7 +626,7 @@ func normalizeAPRSStatus(status string) string {
 
 func (a *app) sendAPRSParts(source string, passcode int, destination string, parts []string, messageIDs []string) ([]sentAPRSPart, bool) {
 	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
-	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	conn, err := netDialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
 		detail := fmt.Sprintf("APRS-IS unreachable at %s: %v", address, err)
 		a.logAPRSSendResult(source, destination, "", "", detail, err)
@@ -689,7 +691,7 @@ func (a *app) sendAPRSAck(source, destination, messageID string) error {
 	}
 	passcode := aprsPasscode(source)
 	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
-	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	conn, err := netDialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
 		detail := fmt.Sprintf("APRS-IS unreachable at %s: %v", address, err)
 		a.logAPRSSendResult(source, destination, "ack"+messageID, "", detail, err)
@@ -744,7 +746,7 @@ func (a *app) sendAPRSBeacon(source string, lat, lon float64, comment string) er
 	}
 	passcode := aprsPasscode(source)
 	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
-	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	conn, err := netDialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
 		detail := fmt.Sprintf("APRS-IS unreachable at %s: %v", address, err)
 		a.logAPRSSendResult(source, "BEACON", comment, "", detail, err)

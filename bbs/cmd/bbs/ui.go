@@ -636,6 +636,9 @@ func (m formModel) fieldLines(i int) int {
 }
 
 func (a *app) runMenu(lang, title, header string, opts []option) string {
+	if a.runMenuHook != nil {
+		return a.runMenuHook(lang, title, header, opts)
+	}
 	clearScreen()
 	m := menuModel{app: a, lang: lang, title: title, header: header, options: opts}
 	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
@@ -646,6 +649,9 @@ func (a *app) runMenu(lang, title, header string, opts []option) string {
 }
 
 func (a *app) runForm(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+	if a.runFormHook != nil {
+		return a.runFormHook(lang, title, fields, buttons)
+	}
 	clearScreen()
 	m := newFormModel(a, lang, title, fields, buttons)
 	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
@@ -787,10 +793,17 @@ func (m infoModel) maxOffset() int {
 }
 
 func (a *app) showInfo(lang, title string, rows [][]string) {
+	if a.showInfoHook != nil {
+		a.showInfoHook(lang, title, rows)
+		return
+	}
 	_ = a.showInfoActions(lang, title, rows, nil)
 }
 
 func (a *app) showInfoActions(lang, title string, rows [][]string, actions []option) string {
+	if a.showInfoActionsHook != nil {
+		return a.showInfoActionsHook(lang, title, rows, actions)
+	}
 	clearScreen()
 	lines := []string{}
 	for _, row := range rows {

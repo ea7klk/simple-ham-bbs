@@ -2,6 +2,8 @@ name: Test and Docker Image
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "*"
   pull_request:
@@ -29,8 +31,25 @@ jobs:
           go-version-file: bbs/go.mod
           cache-dependency-path: bbs/go.sum
 
-      - name: Run tests
-        run: go test ./cmd/bbs
+      - name: Run tests with coverage
+        run: |
+          go test ./cmd/bbs -coverprofile=coverage.out -covermode=atomic
+          go tool cover -func=coverage.out | tee coverage.txt
+          {
+            echo "## Go coverage report"
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          coverage="$(awk '/^total:/ {gsub(/%/, "", $3); print $3}' coverage.txt)"
+          awk -v coverage="$coverage" 'BEGIN {
+            if (coverage + 0 < 60) {
+              printf("Coverage %.1f%% is below required 60%%\n", coverage)
+              exit 1
+            }
+            printf("Coverage %.1f%% meets required 60%%\n", coverage)
+          }'
 
   docker:
     name: Docker image
