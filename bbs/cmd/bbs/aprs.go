@@ -115,7 +115,7 @@ func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destinati
 		action, values, ok := a.runForm(lang, a.t(lang, "aprs_send_message"), []formField{
 			{name: "destination", label: a.t(lang, "aprs_destination_callsign"), value: destCall, required: true, limit: 10, width: 10, sameLine: true, normalizer: normalizeAPRSCallsign, validator: validAPRSBaseCallsign, invalidText: a.t(lang, "aprs_invalid_destination")},
 			{name: "destination_ssid", label: a.t(lang, "aprs_destination_ssid"), value: destSSID, limit: 2, width: 2, sameLine: true, normalizer: normalizeAPRSSSID, validator: validAPRSSSID, invalidText: a.t(lang, "aprs_invalid_ssid")},
-			{name: "text", label: a.t(lang, "aprs_text"), kind: fieldTextArea, required: true, limit: 2000},
+			{name: "text", label: a.t(lang, "aprs_text"), kind: fieldTextArea, limit: 2000},
 		}, []string{"send", "cancel"})
 		if !ok || action == "cancel" {
 			return false
