@@ -5,7 +5,7 @@ on:
     branches:
       - "**"
     tags:
-      - "*"
+      - "v*.*"
   pull_request:
     branches:
       - "**"
@@ -96,3 +96,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Docker host
+    runs-on: self-hosted
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v')
+    env:
+      DEPLOY_COMPOSE_FILE: ${{ vars.DEPLOY_COMPOSE_FILE || 'compose.dockge.yaml' }}
+      DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE || 'bbs' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and redeploy service
+        run: |
+          compose_dir="$(dirname "$DEPLOY_COMPOSE_FILE")"
+          docker compose --project-directory "$compose_dir" -f "$DEPLOY_COMPOSE_FILE" pull "$DEPLOY_SERVICE"
+          docker compose --project-directory "$compose_dir" -f "$DEPLOY_COMPOSE_FILE" up -d --no-deps "$DEPLOY_SERVICE"
