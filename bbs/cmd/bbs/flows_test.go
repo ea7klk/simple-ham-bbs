@@ -482,6 +482,17 @@ func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 
 	packets = withFakeAPRSIS(t, 1)
 	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		return "send", map[string]string{"destination": "ea1abc", "destination_ssid": "", "text": ""}, true
+	}
+	if !a.sendAPRSForm("EA7KLK", userProfile{EnableAPRS: true}, "en", "") {
+		t.Fatal("sendAPRSForm returned false for empty message")
+	}
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], "::EA1ABC   :{") {
+		t.Fatalf("empty APRS packet=%#v", got)
+	}
+
+	packets = withFakeAPRSIS(t, 1)
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
 		return "send", map[string]string{"text": "Checking in"}, true
 	}
 	if !a.sendANSRVRMessage("EA7KLK", userProfile{EnableAPRS: true}, "en", "ANSRVR", "CQ") {

@@ -25,6 +25,9 @@ func TestAPRSPasscode(t *testing.T) {
 }
 
 func TestSplitAPRSMessage(t *testing.T) {
+	if parts := splitAPRSMessage(""); len(parts) != 1 || parts[0] != "" {
+		t.Fatalf("splitAPRSMessage(empty) = %#v, want one empty part", parts)
+	}
 	text := strings.Repeat("A", aprsMessageLimit*2+10)
 	parts := splitAPRSMessage(text)
 	if len(parts) < 3 {
