@@ -677,7 +677,7 @@ func (a *app) sendAPRSParts(source string, passcode int, destination string, par
 }
 
 func (a *app) sendAPRSAck(source, destination, messageID string) error {
-	source = normalizeAPRSCallsign(source)
+	source = aprsSSID0(source)
 	destination = normalizeAPRSCallsign(destination)
 	messageID = normalizeAPRSMessageID(messageID)
 	if !validAPRSCallsign(source) {
