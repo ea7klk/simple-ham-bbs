@@ -118,6 +118,30 @@ func TestSendAPRSAckAndBeaconViaFakeServer(t *testing.T) {
 	}
 }
 
+func TestSendLoginAPRSBeaconUsesUserCallsignSSID0(t *testing.T) {
+	packets := withFakeAPRSIS(t, 1)
+	a := testApp(t)
+	a.cfg.aprsServer = "127.0.0.1"
+	a.cfg.aprsPort = 14580
+	dir := t.TempDir()
+	a.cfg.aprsLogFile = filepath.Join(dir, "aprs.log")
+	a.cfg.bbsLogFile = filepath.Join(dir, "bbs.log")
+
+	a.sendLoginAPRSBeacon("ea7klk", userProfile{EnableAPRS: true, Maidenhead: "IM77AH"})
+
+	got := <-packets
+	if len(got) != 2 || !strings.HasPrefix(got[1], `EA7KLK-0>APRS,TCPIP*:!3718.75N\00557.50Wm`) {
+		t.Fatalf("login beacon packet = %#v", got)
+	}
+	body, err := os.ReadFile(a.cfg.bbsLogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "aprs_beacon_sent user=EA7KLK") {
+		t.Fatalf("login beacon BBS log = %s", body)
+	}
+}
+
 func TestSendLoginAPRSBeaconSkipsAndLogs(t *testing.T) {
 	a := testApp(t)
 	dir := t.TempDir()
