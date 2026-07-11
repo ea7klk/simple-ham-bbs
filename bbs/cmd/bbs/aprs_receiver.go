@@ -68,7 +68,7 @@ func (a *app) aprsReceiverLogin() string {
 
 func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) error {
 	address := net.JoinHostPort(a.cfg.aprsServer, strconv.Itoa(a.cfg.aprsPort))
-	conn, err := net.DialTimeout("tcp", address, 30*time.Second)
+	conn, err := netDialTimeout("tcp", address, 30*time.Second)
 	if err != nil {
 		return err
 	}
