@@ -115,3 +115,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Restart bbs-web
+    runs-on: self-hosted
+    needs: docker
+    if: github.event_name == 'release'
+    steps:
+      - name: Restart bbs-web stack
+        working-directory: /opt/stacks/ham-bbs
+        run: |
+          docker compose pull bbs-web
+          docker compose down bbs-web
+          docker compose up bbs-web -d
