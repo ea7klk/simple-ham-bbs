@@ -17,22 +17,29 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     name: Go tests
     runs-on: self-hosted
     defaults:
       run:
-        working-directory: bbs
+        working-directory: source/bbs
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: source
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: bbs/go.mod
-          cache-dependency-path: bbs/go.sum
+          go-version-file: source/bbs/go.mod
+          cache-dependency-path: source/bbs/go.sum
 
       - name: Run tests with coverage
         run: |
@@ -65,9 +72,9 @@ jobs:
         with:
           name: go-coverage-report
           path: |
-            bbs/coverage.out
-            bbs/coverage.txt
-            bbs/coverage.html
+            source/bbs/coverage.out
+            source/bbs/coverage.txt
+            source/bbs/coverage.html
 
   docker:
     name: Docker image
@@ -79,6 +86,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: source
 
       - name: Set image name
         id: image
@@ -108,8 +118,8 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v7
         with:
-          context: ./bbs
-          file: ./bbs/Dockerfile
+          context: ./source/bbs
+          file: ./source/bbs/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -125,6 +135,6 @@ jobs:
       - name: Restart bbs-web stack
         working-directory: /opt/stacks/ham-bbs
         run: |
-          docker compose pull bbs-web
-          docker compose down bbs-web
-          docker compose up bbs-web -d
+          docker compose pull bbs
+          docker compose down bbs
+          docker compose up bbs -d
