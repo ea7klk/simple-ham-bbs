@@ -127,7 +127,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Restart bbs-web
+    name: Restart bbs
     runs-on: self-hosted
     needs: docker
     if: github.event_name == 'release'
