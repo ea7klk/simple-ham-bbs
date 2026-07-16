@@ -502,6 +502,17 @@ func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 		t.Fatalf("ANSRVR packet=%#v", got)
 	}
 
+	packets = withFakeAPRSIS(t, 1)
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		return "send", map[string]string{"text": "Thursday check-in"}, true
+	}
+	if !a.sendANSRVRMessage("EA7KLK", userProfile{EnableAPRS: true}, "en", "APRSThursday", "CQ HOTG") {
+		t.Fatal("sendANSRVRMessage returned false for APRSThursday")
+	}
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], ":CQ HOTG Thursday check-in{") {
+		t.Fatalf("APRSThursday ANSRVR packet=%#v", got)
+	}
+
 	sentRows := a.loadSentHistory("EA7KLK")
 	a.runMenuHook = func(lang, title, header string, opts []option) string { return "1" }
 	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string { return "d" }
