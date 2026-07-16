@@ -150,7 +150,7 @@ func (a *app) joinAPRSThursday(callsign string, profile userProfile, lang string
 		a.showInfoActions(lang, a.t(lang, "aprs_join_aprs_thursday"), [][]string{{a.t(lang, "aprs_not_thursday_warning")}}, []option{{"q", a.t(lang, "back_button")}})
 		return
 	}
-	a.sendANSRVRMessage(callsign, profile, lang, a.t(lang, "aprs_join_aprs_thursday"), "HOTG")
+	a.sendANSRVRMessage(callsign, profile, lang, a.t(lang, "aprs_join_aprs_thursday"), "CQ HOTG")
 }
 
 func (a *app) joinAPRSPH(callsign string, profile userProfile, lang string) {
