@@ -15,7 +15,14 @@ func testApp(t *testing.T) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &app{cfg: config{dataDir: dir, dbFile: filepath.Join(dir, "bbs.sqlite")}, db: db, text: map[string]map[string]any{"en": {}}}
+	return &app{cfg: config{
+		dataDir:         dir,
+		dbFile:          filepath.Join(dir, "bbs.sqlite"),
+		aprsLogFile:     filepath.Join(dir, "aprs.log"),
+		bbsLogFile:      filepath.Join(dir, "bbs.log"),
+		authLogFile:     filepath.Join(dir, "auth.log"),
+		fail2banLogFile: filepath.Join(dir, "fail2ban.log"),
+	}, db: db, text: map[string]map[string]any{"en": {}}}
 }
 
 func TestAPRSPasscode(t *testing.T) {

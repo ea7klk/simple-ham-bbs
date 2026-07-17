@@ -21,6 +21,7 @@ GatewayPorts no
 PermitUserEnvironment no
 ClientAliveInterval 300
 ClientAliveCountMax 2
+LogLevel VERBOSE
 
 Match User bbs
     ForceCommand /usr/local/bin/bbs_session.sh

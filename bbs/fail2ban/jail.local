@@ -1,0 +1,14 @@
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 5
+backend = polling
+banaction = iptables-multiport
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+port = 2222
+filter = sshd
+logpath = /var/log/auth.log
+mode = normal
