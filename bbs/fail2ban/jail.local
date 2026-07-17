@@ -12,3 +12,9 @@ port = 2222
 filter = sshd
 logpath = /var/log/auth.log
 mode = normal
+
+[sshd-ddos]
+enabled = false
+
+[dropbear]
+enabled = false
