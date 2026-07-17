@@ -23,9 +23,11 @@ func (a *app) runAPRSSupervisor() error {
 	}
 	go tailLogFile(a.cfg.aprsLogFile)
 	go tailLogFile(a.cfg.bbsLogFile)
+	go tailLogFile(a.cfg.authLogFile)
+	go tailLogFile(a.cfg.fail2banLogFile)
 	go a.rotateRuntimeLogsNightly()
 
-	a.logAPRSReceiver("APRS supervisor started; consolidated APRS log=%s; nightly log rotation at 03:00 UTC, retention=7 days", a.cfg.aprsLogFile)
+	a.logAPRSReceiver("APRS supervisor started; nightly log rotation at 03:00 UTC, retention=7 days")
 	return a.watchAPRSReceiver()
 }
 
@@ -44,7 +46,7 @@ func (a *app) ensureRuntimeLogFiles() error {
 }
 
 func (a *app) runtimeLogFiles() []string {
-	return []string{a.cfg.aprsLogFile, a.cfg.bbsLogFile}
+	return []string{a.cfg.aprsLogFile, a.cfg.bbsLogFile, a.cfg.authLogFile, a.cfg.fail2banLogFile}
 }
 
 func (a *app) watchAPRSReceiver() error {

@@ -49,6 +49,8 @@ type config struct {
 	dbFile               string
 	aprsLogFile          string
 	bbsLogFile           string
+	authLogFile          string
+	fail2banLogFile      string
 	transFile            string
 	name                 string
 	sysopName            string

@@ -26,8 +26,8 @@ configure_login_password() {
 }
 
 prepare_runtime_dirs() {
-  mkdir -p /run/sshd "$data_dir/aprs" /home/bbs/.ssh "$host_key_dir"
-  touch "$data_dir/aprs/aprs.log" "$data_dir/bbs.log"
+  mkdir -p /run/sshd /run/fail2ban "$data_dir/aprs" /home/bbs/.ssh "$host_key_dir" /var/log
+  touch "$data_dir/aprs/aprs.log" "$data_dir/bbs.log" /var/log/auth.log /var/log/fail2ban.log
   chown -R bbs:bbs /home/bbs/.ssh
   chown -R bbs:bbs "$data_dir" || echo "Warning: could not change ownership of $data_dir"
   chmod 700 /home/bbs/.ssh
@@ -76,6 +76,7 @@ install_authorized_keys() {
 }
 
 start_helper_processes() {
+  fail2ban-server -x -b &
   (
     while true; do
       /usr/local/bin/bbs_app aprs-supervisor
