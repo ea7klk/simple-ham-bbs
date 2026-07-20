@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func testUIApp() *app {
@@ -78,8 +80,18 @@ func TestTerminalLayout(t *testing.T) {
 	if panelContentWidth != 128 || panelContentHeight != 41 {
 		t.Fatalf("panel content = %dx%d, want 128x41", panelContentWidth, panelContentHeight)
 	}
+	for name, style := range map[string]lipgloss.Style{"panel": panelStyle, "form": formPanelStyle} {
+		view := style.Render("content")
+		if lipgloss.Width(view) != screenWidth || lipgloss.Height(view) != screenHeight {
+			t.Fatalf("%s panel size = %dx%d, want %dx%d", name, lipgloss.Width(view), lipgloss.Height(view), screenWidth, screenHeight)
+		}
+	}
 	if got := clientTerminalResizeSequence(); got != "\033[8;43;132t" {
 		t.Fatalf("resize sequence = %q", got)
+	}
+	msg := fixedTerminalSizeFilter(nil, tea.WindowSizeMsg{Width: 80, Height: 24}).(tea.WindowSizeMsg)
+	if msg.Width != screenWidth || msg.Height != screenHeight {
+		t.Fatalf("filtered terminal size = %dx%d", msg.Width, msg.Height)
 	}
 }
 
@@ -123,11 +135,53 @@ func TestMenuModelUpdateAndView(t *testing.T) {
 	if lines := wrapText("one two three four", 10); len(lines) < 2 {
 		t.Fatalf("wrapText = %#v", lines)
 	}
+	for _, line := range wrapText("12345678 💡", 10) {
+		if lipgloss.Width(line) > 10 {
+			t.Fatalf("wide-character wrapped line width = %d: %q", lipgloss.Width(line), line)
+		}
+	}
 	if truncateText("abcdef", 4) != "a..." || truncateText("abcdef", 2) != "ab" {
 		t.Fatal("truncateText failed")
 	}
 	if !strings.Contains(dimWrapped("one two", 10), "one") {
 		t.Fatal("dimWrapped missing text")
+	}
+	short := renderMenuOption(option{value: "1", label: "Message"}, false)
+	long := renderMenuOption(option{value: "10", label: "Message"}, false)
+	if strings.Index(short, "Message") != strings.Index(long, "Message") {
+		t.Fatalf("menu number column shifted label: short=%q long=%q", short, long)
+	}
+}
+
+func TestMenuModelPageNavigation(t *testing.T) {
+	a := testUIApp()
+	options := make([]option, 100)
+	for i := range options {
+		options[i] = option{value: fmt.Sprintf("%d", i+1), label: fmt.Sprintf("Message %d", i+1)}
+	}
+	m := menuModel{app: a, lang: "en", title: "Messages", options: options, cursor: 50}
+	model, _ := m.Update(key("pgup"))
+	m = model.(menuModel)
+	if m.cursor >= 50 || m.cursor < 0 {
+		t.Fatalf("cursor after pgup = %d", m.cursor)
+	}
+	previous := m.cursor
+	model, _ = m.Update(key("pgdown"))
+	m = model.(menuModel)
+	if m.cursor <= previous || m.cursor >= len(options) {
+		t.Fatalf("cursor after pgdown = %d, previous=%d", m.cursor, previous)
+	}
+	m.cursor = 0
+	model, _ = m.Update(key("pgup"))
+	m = model.(menuModel)
+	if m.cursor != 0 {
+		t.Fatalf("cursor pgup at start = %d", m.cursor)
+	}
+	m.cursor = len(options) - 1
+	model, _ = m.Update(key("pgdown"))
+	m = model.(menuModel)
+	if m.cursor != len(options)-1 {
+		t.Fatalf("cursor pgdown at end = %d", m.cursor)
 	}
 }
 

@@ -128,7 +128,6 @@ func (a *app) seedData() error {
 }
 
 func (a *app) run() error {
-	resizeClientTerminal()
 	callsign, profile, err := a.authenticate()
 	if err != nil {
 		if errors.Is(err, errLoginCancelled) {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func testApp(t *testing.T) *app {
@@ -338,6 +340,45 @@ func TestAPRSDetailRowsDoNotSplitMultipartText(t *testing.T) {
 	}
 	if len(rows) < 8 || rows[4][0] != "" || !strings.HasPrefix(rows[5][0], "---") || rows[6][0] != "" {
 		t.Fatalf("received detail missing separator before raw packet: %#v", rows)
+	}
+}
+
+func TestAPRSDisplayTextRemovesTerminalControlsAndKeepsListWidth(t *testing.T) {
+	got := singleLineAPRSDetail("before \u009f after\nnext")
+	if got != "before after next" {
+		t.Fatalf("sanitized APRS text = %q", got)
+	}
+	label := (&app{}).receivedAPRSListLabel(receivedAPRS{
+		From: "EA1ABC",
+		At:   "2026-07-20 12:00 UTC",
+		Text: "hello ð\u009f¡ world",
+	})
+	if strings.ContainsRune(label, '\u009f') || strings.ContainsRune(label, '\u0092') {
+		t.Fatalf("APRS list label contains terminal control: %q", label)
+	}
+	if lipgloss.Width(label) != aprsListLabelWidth {
+		t.Fatalf("APRS list label width = %d, want %d: %q", lipgloss.Width(label), aprsListLabelWidth, label)
+	}
+	sentLabel := (&app{}).sentAPRSListLabel(sentAPRS{At: "2026-07-20 12:00 UTC", To: "LONGDEST-12", Text: "hello 💡 world"})
+	if lipgloss.Width(sentLabel) != aprsListLabelWidth {
+		t.Fatalf("sent APRS list label width = %d, want %d: %q", lipgloss.Width(sentLabel), aprsListLabelWidth, sentLabel)
+	}
+}
+
+func TestReceivedAPRSPageTitleIncludesTotal(t *testing.T) {
+	a := testApp(t)
+	a.text["en"]["aprs_received_messages"] = "Received APRS messages"
+	if _, err := a.addReceivedRecord("EA7KLK", receivedAPRS{From: "EA1ABC", To: "EA7KLK-0", Text: "hello", Raw: "raw"}); err != nil {
+		t.Fatal(err)
+	}
+	var title string
+	a.runMenuHook = func(lang, gotTitle, header string, opts []option) string {
+		title = gotTitle
+		return "q"
+	}
+	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en")
+	if title != "1 Received APRS messages" {
+		t.Fatalf("received APRS title = %q", title)
 	}
 }
 

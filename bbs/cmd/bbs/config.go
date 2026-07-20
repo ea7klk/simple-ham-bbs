@@ -25,6 +25,7 @@ const (
 	formInputWidth              = 72
 	formSingleLineMaxWidth      = 72
 	formTextAreaHeight          = 10
+	menuOptionColumnWidth       = 3
 )
 
 var (

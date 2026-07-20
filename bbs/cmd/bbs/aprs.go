@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"gorm.io/gorm"
 )
@@ -16,6 +17,13 @@ const (
 	aprsStatusSent   = "sent"
 	aprsStatusFailed = "failed"
 	aprsBeaconText   = "HamNet BBS"
+
+	aprsListLabelWidth       = panelContentWidth - (menuOptionColumnWidth + 4) // Option plus row prefix.
+	aprsCallsignColumnWidth  = 13
+	aprsTimestampColumnWidth = 20
+	aprsListGapWidth         = 2
+	aprsReceivedTextWidth    = aprsListLabelWidth - aprsCallsignColumnWidth - aprsTimestampColumnWidth - 2*aprsListGapWidth
+	aprsSentTextWidth        = aprsListLabelWidth - 1 - aprsTimestampColumnWidth - aprsCallsignColumnWidth - 3*aprsListGapWidth
 )
 
 var netDialTimeout = net.DialTimeout
@@ -62,12 +70,13 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string) {
 	for {
 		history := reverseReceived(a.trimReceived(callsign))
+		title := fmt.Sprintf("%d %s", len(history), a.t(lang, "aprs_received_messages"))
 		if !profile.EnableAPRS {
-			a.showInfo(lang, a.t(lang, "aprs_received_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
+			a.showInfo(lang, title, [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return
 		}
 		if len(history) == 0 {
-			a.showInfoActions(lang, a.t(lang, "aprs_received_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_no_received_messages")}}, []option{{"q", a.t(lang, "back_button")}})
+			a.showInfoActions(lang, title, [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_no_received_messages")}}, []option{{"q", a.t(lang, "back_button")}})
 			return
 		}
 		opts := []option{}
@@ -75,7 +84,7 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 			opts = append(opts, option{strconv.Itoa(i + 1), a.receivedAPRSListLabel(item)})
 		}
 		opts = append(opts, option{"q", a.t(lang, "back_button")})
-		choice := a.runMenu(lang, a.t(lang, "aprs_received_messages"), a.t(lang, "aprs_latest_received"), opts)
+		choice := a.runMenu(lang, title, a.t(lang, "aprs_latest_received"), opts)
 		if choice == "q" {
 			return
 		}
@@ -255,7 +264,11 @@ func (a *app) receivedAPRSSummary(item receivedAPRS) string {
 }
 
 func (a *app) receivedAPRSListLabel(item receivedAPRS) string {
-	return fmt.Sprintf("%-9s  %-17s  %s", item.From, item.At, truncateText(singleLineAPRSDetail(stripAPRSMessageID(item.Text)), 34))
+	return paddedCell(item.From, aprsCallsignColumnWidth) +
+		strings.Repeat(" ", aprsListGapWidth) +
+		paddedCell(item.At, aprsTimestampColumnWidth) +
+		strings.Repeat(" ", aprsListGapWidth) +
+		paddedCell(singleLineAPRSDetail(stripAPRSMessageID(item.Text)), aprsReceivedTextWidth)
 }
 
 func (a *app) sentAPRSSummary(lang string, item sentAPRS) string {
@@ -264,7 +277,13 @@ func (a *app) sentAPRSSummary(lang string, item sentAPRS) string {
 }
 
 func (a *app) sentAPRSListLabel(item sentAPRS) string {
-	return fmt.Sprintf("%-1s  %-17s  %-9s  %s", sentAckIcon(item), item.At, item.To, truncateText(singleLineAPRSDetail(item.Text), 31))
+	return paddedCell(sentAckIcon(item), 1) +
+		strings.Repeat(" ", aprsListGapWidth) +
+		paddedCell(item.At, aprsTimestampColumnWidth) +
+		strings.Repeat(" ", aprsListGapWidth) +
+		paddedCell(item.To, aprsCallsignColumnWidth) +
+		strings.Repeat(" ", aprsListGapWidth) +
+		paddedCell(singleLineAPRSDetail(item.Text), aprsSentTextWidth)
 }
 
 func sentAckIcon(item sentAPRS) string {
@@ -347,7 +366,21 @@ func (a *app) aprsReceivedDetailRows(lang string, item receivedAPRS) [][]string 
 }
 
 func singleLineAPRSDetail(text string) string {
-	return strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
+	text = strings.ToValidUTF8(text, "�")
+	var cleaned strings.Builder
+	for _, r := range text {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			cleaned.WriteByte(' ')
+		case unicode.IsControl(r):
+			// C1 controls can appear when UTF-8 text was decoded as Latin-1
+			// (for example the U+009F in mojibaked emoji text). Never pass
+			// terminal controls through an APRS screen.
+		default:
+			cleaned.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(cleaned.String()), " ")
 }
 
 func (a *app) showSendingAPRS(lang, destination string) {
