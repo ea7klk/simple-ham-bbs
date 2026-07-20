@@ -14,14 +14,17 @@ const (
 	sentHistoryLimit            = 200
 	receivedHistoryLimit        = 500
 	aprsReceiverRestartInterval = time.Hour
-	screenWidth                 = 80
-	screenHeight                = 24
+	screenWidth                 = 132
+	screenHeight                = 43
 	panelBorderWidth            = 2
 	panelPaddingWidth           = 2
 	panelVerticalFrame          = 2
 	panelStyleWidth             = screenWidth - panelBorderWidth
 	panelContentWidth           = panelStyleWidth - panelPaddingWidth
 	panelContentHeight          = screenHeight - panelVerticalFrame
+	formInputWidth              = 72
+	formSingleLineMaxWidth      = 72
+	formTextAreaHeight          = 10
 )
 
 var (

@@ -237,14 +237,13 @@ func newFormModel(a *app, lang, title string, fields []formField, buttons []stri
 	} else if len(buttons) == 0 {
 		buttons = []string{"save", "cancel"}
 	}
-	inputWidth := 40
 	for i := range fields {
 		switch fields[i].kind {
 		case fieldText, fieldPassword:
 			ti := textinput.New()
 			ti.SetValue(fields[i].value)
 			ti.CharLimit = fields[i].limit
-			ti.Width = inputWidth
+			ti.Width = formInputWidth
 			ti.Prompt = ""
 			if fields[i].kind == fieldPassword {
 				ti.EchoMode = textinput.EchoPassword
@@ -256,7 +255,7 @@ func newFormModel(a *app, lang, title string, fields []formField, buttons []stri
 			ta.SetValue(fields[i].value)
 			ta.CharLimit = fields[i].limit
 			ta.SetWidth(panelContentWidth - 4)
-			ta.SetHeight(5)
+			ta.SetHeight(formTextAreaHeight)
 			ta.ShowLineNumbers = false
 			fields[i].area = ta
 		}
@@ -493,8 +492,8 @@ func (m formModel) renderField(i int) string {
 		if f.width > 0 {
 			fieldWidth = f.width
 		}
-		if fieldWidth > 34 {
-			fieldWidth = 34
+		if fieldWidth > formSingleLineMaxWidth {
+			fieldWidth = formSingleLineMaxWidth
 		}
 		if fieldWidth < 12 {
 			fieldWidth = 12
@@ -627,7 +626,7 @@ func (m formModel) fieldLines(i int) int {
 		return 0
 	}
 	if m.fields[i].kind == fieldTextArea {
-		return 6
+		return formTextAreaHeight + 1
 	}
 	if m.fields[i].kind == fieldText || m.fields[i].kind == fieldPassword {
 		return 1
@@ -664,6 +663,16 @@ func (a *app) runForm(lang, title string, fields []formField, buttons []string) 
 
 func clearScreen() {
 	fmt.Print("\033[2J\033[3J\033[H")
+}
+
+func clientTerminalResizeSequence() string {
+	return fmt.Sprintf("\033[8;%d;%dt", screenHeight, screenWidth)
+}
+
+func resizeClientTerminal() {
+	// This is supported by common xterm-compatible SSH clients. Clients that
+	// do not allow application-driven resizing simply ignore the sequence.
+	_, _ = fmt.Fprint(os.Stdout, clientTerminalResizeSequence())
 }
 
 type infoModel struct {

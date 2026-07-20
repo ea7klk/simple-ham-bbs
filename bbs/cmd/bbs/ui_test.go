@@ -71,6 +71,18 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
+func TestTerminalLayout(t *testing.T) {
+	if screenWidth != 132 || screenHeight != 43 {
+		t.Fatalf("terminal layout = %dx%d, want 132x43", screenWidth, screenHeight)
+	}
+	if panelContentWidth != 128 || panelContentHeight != 41 {
+		t.Fatalf("panel content = %dx%d, want 128x41", panelContentWidth, panelContentHeight)
+	}
+	if got := clientTerminalResizeSequence(); got != "\033[8;43;132t" {
+		t.Fatalf("resize sequence = %q", got)
+	}
+}
+
 func TestMenuModelUpdateAndView(t *testing.T) {
 	a := testUIApp()
 	m := menuModel{app: a, lang: "en", title: "Menu", header: strings.Repeat("header\n", 8), options: []option{{"1", "One"}, {"2", "Two"}, {"q", "Quit"}}}
@@ -197,7 +209,7 @@ func TestFormModelValidationNavigationAndRendering(t *testing.T) {
 	if start, end := render.visibleFieldRange(7); start > 2 || end <= 2 {
 		t.Fatalf("visibleFieldRange = %d/%d", start, end)
 	}
-	if render.fieldLines(-1) != 0 || render.fieldLines(2) != 6 || render.fieldLines(3) != 2 {
+	if render.fieldLines(-1) != 0 || render.fieldLines(2) != formTextAreaHeight+1 || render.fieldLines(3) != 2 {
 		t.Fatal("fieldLines failed")
 	}
 	if view := render.View(); !strings.Contains(view, "Render") || !strings.Contains(view, "Area") || !strings.Contains(view, "TAB next") {
