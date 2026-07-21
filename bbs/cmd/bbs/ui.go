@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"os"
-	"strings"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type menuModel struct {
@@ -38,6 +40,16 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j", "tab":
 			m.cursor = (m.cursor + 1) % len(m.options)
+		case "pgup":
+			m.cursor -= m.pageStep()
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+		case "pgdown":
+			m.cursor += m.pageStep()
+			if m.cursor >= len(m.options) {
+				m.cursor = len(m.options) - 1
+			}
 		case "enter":
 			m.chosen, m.done = m.options[m.cursor].value, true
 			return m, tea.Quit
@@ -62,31 +74,46 @@ func (m menuModel) View() string {
 	}
 	b.WriteString(titleStyle.Render(m.title) + "\n\n")
 	prefixLines := lineCount(b.String())
-	optionRoom := panelContentHeight - prefixLines - 2
-	if optionRoom < 3 {
-		optionRoom = 3
-	} else {
-		optionRoom -= 2
-	}
+	optionRoom := menuOptionRoom(prefixLines)
 	start, end := visibleRange(len(m.options), m.cursor, optionRoom)
 	if start > 0 {
 		b.WriteString(dimStyle.Render("...") + "\n")
 	}
 	for i := start; i < end; i++ {
 		opt := m.options[i]
-		row := fmt.Sprintf(" %s  %s", opt.value, opt.label)
-		if i == m.cursor {
-			row = selectedStyle.Render(">" + row)
-		} else {
-			row = " " + row
-		}
-		b.WriteString(row + "\n")
+		b.WriteString(renderMenuOption(opt, i == m.cursor) + "\n")
 	}
 	if end < len(m.options) {
 		b.WriteString(dimStyle.Render("...") + "\n")
 	}
 	b.WriteString("\n" + dimWrapped(m.app.t(m.lang, "menu_hint_actions"), panelContentWidth))
 	return panelStyle.Render(b.String())
+}
+
+func renderMenuOption(opt option, selected bool) string {
+	row := fmt.Sprintf(" %*s  %s", menuOptionColumnWidth, opt.value, opt.label)
+	if selected {
+		return selectedStyle.Render(">" + row)
+	}
+	return " " + row
+}
+
+func menuOptionRoom(prefixLines int) int {
+	room := panelContentHeight - prefixLines - 2
+	if room < 3 {
+		return 3
+	}
+	return room - 2
+}
+
+func (m menuModel) pageStep() int {
+	var b strings.Builder
+	b.WriteString(m.app.banner(m.lang))
+	if m.header != "" {
+		b.WriteString(limitLines(m.header, 5) + "\n\n")
+	}
+	b.WriteString(titleStyle.Render(m.title) + "\n\n")
+	return max(1, menuOptionRoom(lineCount(b.String()))-2)
 }
 
 func visibleRange(total, cursor, room int) (int, int) {
@@ -164,7 +191,7 @@ func wrapText(text string, width int) []string {
 				line = word
 				continue
 			}
-			if len([]rune(line))+1+len([]rune(word)) > width {
+			if lipgloss.Width(line)+1+lipgloss.Width(word) > width {
 				out = append(out, line)
 				line = word
 				continue
@@ -180,14 +207,22 @@ func wrapText(text string, width int) []string {
 
 func truncateText(text string, width int) string {
 	text = strings.Join(strings.Fields(text), " ")
-	runes := []rune(text)
-	if len(runes) <= width {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(text) <= width {
 		return text
 	}
-	if width <= 3 {
-		return string(runes[:width])
+	suffix := "..."
+	suffixWidth := lipgloss.Width(suffix)
+	if width <= suffixWidth {
+		return truncateDisplayWidth(text, width)
 	}
-	return string(runes[:width-3]) + "..."
+	return truncateDisplayWidth(text, width-suffixWidth) + suffix
+}
+
+func truncateDisplayWidth(text string, width int) string {
+	return ansi.Truncate(text, width, "")
 }
 
 type fieldKind int
@@ -237,14 +272,13 @@ func newFormModel(a *app, lang, title string, fields []formField, buttons []stri
 	} else if len(buttons) == 0 {
 		buttons = []string{"save", "cancel"}
 	}
-	inputWidth := 40
 	for i := range fields {
 		switch fields[i].kind {
 		case fieldText, fieldPassword:
 			ti := textinput.New()
 			ti.SetValue(fields[i].value)
 			ti.CharLimit = fields[i].limit
-			ti.Width = inputWidth
+			ti.Width = formInputWidth
 			ti.Prompt = ""
 			if fields[i].kind == fieldPassword {
 				ti.EchoMode = textinput.EchoPassword
@@ -256,7 +290,7 @@ func newFormModel(a *app, lang, title string, fields []formField, buttons []stri
 			ta.SetValue(fields[i].value)
 			ta.CharLimit = fields[i].limit
 			ta.SetWidth(panelContentWidth - 4)
-			ta.SetHeight(5)
+			ta.SetHeight(formTextAreaHeight)
 			ta.ShowLineNumbers = false
 			fields[i].area = ta
 		}
@@ -493,8 +527,8 @@ func (m formModel) renderField(i int) string {
 		if f.width > 0 {
 			fieldWidth = f.width
 		}
-		if fieldWidth > 34 {
-			fieldWidth = 34
+		if fieldWidth > formSingleLineMaxWidth {
+			fieldWidth = formSingleLineMaxWidth
 		}
 		if fieldWidth < 12 {
 			fieldWidth = 12
@@ -627,7 +661,7 @@ func (m formModel) fieldLines(i int) int {
 		return 0
 	}
 	if m.fields[i].kind == fieldTextArea {
-		return 6
+		return formTextAreaHeight + 1
 	}
 	if m.fields[i].kind == fieldText || m.fields[i].kind == fieldPassword {
 		return 1
@@ -641,7 +675,7 @@ func (a *app) runMenu(lang, title, header string, opts []option) string {
 	}
 	clearScreen()
 	m := menuModel{app: a, lang: lang, title: title, header: header, options: opts}
-	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
+	model, err := newTerminalProgram(m).Run()
 	if err != nil {
 		return "q"
 	}
@@ -654,7 +688,7 @@ func (a *app) runForm(lang, title string, fields []formField, buttons []string) 
 	}
 	clearScreen()
 	m := newFormModel(a, lang, title, fields, buttons)
-	model, err := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
+	model, err := newTerminalProgram(m).Run()
 	if err != nil {
 		return "cancel", nil, false
 	}
@@ -663,7 +697,35 @@ func (a *app) runForm(lang, title string, fields []formField, buttons []string) 
 }
 
 func clearScreen() {
+	resizeClientTerminal()
 	fmt.Print("\033[2J\033[3J\033[H")
+}
+
+func clientTerminalResizeSequence() string {
+	return fmt.Sprintf("\033[8;%d;%dt", screenHeight, screenWidth)
+}
+
+func resizeClientTerminal() {
+	// This is supported by common xterm-compatible SSH clients. Clients that
+	// do not allow application-driven resizing simply ignore the sequence.
+	_, _ = fmt.Fprint(os.Stdout, clientTerminalResizeSequence())
+}
+
+func fixedTerminalSizeFilter(_ tea.Model, msg tea.Msg) tea.Msg {
+	if _, ok := msg.(tea.WindowSizeMsg); ok {
+		return tea.WindowSizeMsg{Width: screenWidth, Height: screenHeight}
+	}
+	return msg
+}
+
+func newTerminalProgram(model tea.Model) *tea.Program {
+	return tea.NewProgram(
+		model,
+		tea.WithInput(os.Stdin),
+		tea.WithOutput(os.Stdout),
+		tea.WithAltScreen(),
+		tea.WithFilter(fixedTerminalSizeFilter),
+	)
 }
 
 type infoModel struct {
@@ -829,7 +891,7 @@ func (a *app) showInfoActions(lang, title string, rows [][]string, actions []opt
 		}
 	}
 	model := infoModel{app: a, lang: lang, title: title, lines: lines, actions: actions}
-	done, err := tea.NewProgram(model, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen()).Run()
+	done, err := newTerminalProgram(model).Run()
 	if err != nil {
 		return "q"
 	}

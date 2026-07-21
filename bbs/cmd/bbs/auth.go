@@ -19,7 +19,7 @@ func (a *app) authenticate() (string, userProfile, error) {
 	for {
 		var header strings.Builder
 		for _, code := range languageOrder {
-			header.WriteString(languages[code] + ": " + truncateText(strings.Join(a.tList(code, "login_info"), " "), 62) + "\n")
+			header.WriteString(languages[code] + ": " + truncateText(strings.Join(a.tList(code, "login_info"), " "), panelContentWidth-12) + "\n")
 		}
 		loginTitle := "Login\n" + strings.TrimSpace(header.String())
 		_, values, ok := a.runForm("en", loginTitle, []formField{

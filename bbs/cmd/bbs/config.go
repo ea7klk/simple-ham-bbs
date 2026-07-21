@@ -14,7 +14,7 @@ const (
 	sentHistoryLimit            = 200
 	receivedHistoryLimit        = 500
 	aprsReceiverRestartInterval = time.Hour
-	screenWidth                 = 80
+	screenWidth                 = 132
 	screenHeight                = 24
 	panelBorderWidth            = 2
 	panelPaddingWidth           = 2
@@ -22,6 +22,10 @@ const (
 	panelStyleWidth             = screenWidth - panelBorderWidth
 	panelContentWidth           = panelStyleWidth - panelPaddingWidth
 	panelContentHeight          = screenHeight - panelVerticalFrame
+	formInputWidth              = 72
+	formSingleLineMaxWidth      = 72
+	formTextAreaHeight          = 5
+	menuOptionColumnWidth       = 3
 )
 
 var (
@@ -30,7 +34,7 @@ var (
 	emailRE        = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 	maidenheadRE   = regexp.MustCompile(`^[A-Ra-r]{2}([0-9]{2}([A-Xa-x]{2}([0-9]{2}([A-Xa-x]{2})?)?)?)?$`)
 	boardIDRE      = regexp.MustCompile(`[^a-z0-9]+`)
-	asciiBorder    = lipgloss.Border{Top: "-", Bottom: "-", Left: "|", Right: "|", TopLeft: "+", TopRight: "+", BottomLeft: "+", BottomRight: "+"}
+	boxBorder      = lipgloss.Border{Top: "─", Bottom: "─", Left: "│", Right: "│", TopLeft: "┌", TopRight: "┐", BottomLeft: "└", BottomRight: "┘"}
 	titleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
 	subtitleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	selectedStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("14"))
@@ -38,8 +42,8 @@ var (
 	errorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	successStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 	cursorStyle    = lipgloss.NewStyle().Reverse(true)
-	panelStyle     = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(asciiBorder).BorderForeground(lipgloss.Color("14")).Padding(0, 1)
-	formPanelStyle = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(asciiBorder).BorderForeground(lipgloss.Color("10")).Padding(0, 1)
+	panelStyle     = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(boxBorder).BorderForeground(lipgloss.Color("14")).Padding(0, 1)
+	formPanelStyle = lipgloss.NewStyle().Width(panelStyleWidth).Height(panelContentHeight).Border(boxBorder).BorderForeground(lipgloss.Color("10")).Padding(0, 1)
 	languages      = map[string]string{"en": "English", "es": "Espanol", "fr": "Francais", "de": "Deutsch"}
 	languageOrder  = []string{"en", "es", "fr", "de"}
 )

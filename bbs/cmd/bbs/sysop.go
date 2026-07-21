@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"gorm.io/gorm"
 	"strconv"
 	"strings"
@@ -113,7 +114,7 @@ func userListRow(callsign, lastSeen, status, role, fullName string, nameWidth in
 
 func paddedCell(text string, width int) string {
 	text = truncateText(text, width)
-	padding := width - len([]rune(text))
+	padding := width - lipgloss.Width(text)
 	if padding < 0 {
 		padding = 0
 	}
