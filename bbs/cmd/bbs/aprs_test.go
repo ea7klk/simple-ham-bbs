@@ -363,6 +363,15 @@ func TestAPRSDisplayTextRemovesTerminalControlsAndKeepsListWidth(t *testing.T) {
 	if lipgloss.Width(sentLabel) != aprsListLabelWidth {
 		t.Fatalf("sent APRS list label width = %d, want %d: %q", lipgloss.Width(sentLabel), aprsListLabelWidth, sentLabel)
 	}
+	grapheme := "👨‍👩‍👧‍👦"
+	truncated := truncateText(strings.Repeat(grapheme, 20), 10)
+	if strings.Contains(truncated, "\u200d...") || lipgloss.Width(truncated) > 10 {
+		t.Fatalf("Unicode APRS text was truncated inside a grapheme: width=%d text=%q", lipgloss.Width(truncated), truncated)
+	}
+	selected := renderMenuOption(option{value: "1", label: (&app{}).receivedAPRSListLabel(receivedAPRS{From: "EA1ABC", At: "2026-07-20 12:00 UTC", Text: strings.Repeat(grapheme, 20)})}, true)
+	if lipgloss.Width(selected) != panelContentWidth {
+		t.Fatalf("selected received APRS row width = %d, want %d: %q", lipgloss.Width(selected), panelContentWidth, selected)
+	}
 }
 
 func TestReceivedAPRSPageTitleIncludesTotal(t *testing.T) {

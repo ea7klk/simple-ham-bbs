@@ -85,6 +85,11 @@ func TestTerminalLayout(t *testing.T) {
 		if lipgloss.Width(view) != screenWidth || lipgloss.Height(view) != screenHeight {
 			t.Fatalf("%s panel size = %dx%d, want %dx%d", name, lipgloss.Width(view), lipgloss.Height(view), screenWidth, screenHeight)
 		}
+		for _, borderChar := range []string{"┌", "─", "┐", "│", "└", "┘"} {
+			if !strings.Contains(view, borderChar) {
+				t.Fatalf("%s panel is missing Unicode border character %q: %q", name, borderChar, view)
+			}
+		}
 	}
 	if got := clientTerminalResizeSequence(); got != "\033[8;24;132t" {
 		t.Fatalf("resize sequence = %q", got)

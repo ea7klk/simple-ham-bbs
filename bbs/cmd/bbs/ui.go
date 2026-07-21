@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"os"
-	"strings"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type menuModel struct {
@@ -220,20 +222,7 @@ func truncateText(text string, width int) string {
 }
 
 func truncateDisplayWidth(text string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	var b strings.Builder
-	used := 0
-	for _, r := range text {
-		runeWidth := lipgloss.Width(string(r))
-		if runeWidth > 0 && used+runeWidth > width {
-			break
-		}
-		b.WriteRune(r)
-		used += runeWidth
-	}
-	return b.String()
+	return ansi.Truncate(text, width, "")
 }
 
 type fieldKind int
