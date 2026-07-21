@@ -2,7 +2,7 @@
 
 A small, fully Dockerized SSH BBS for amateur radio operators. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
 
-The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending/receiving. Screens target a 132×43 terminal; on each screen the BBS sends a best-effort xterm resize request to the client and keeps Bubble Tea's logical renderer at the same size. If the SSH client blocks remote window resizing, enable its window-operation permission or set the client window to 132×43 manually; SSH has no protocol-level server request for changing the local emulator window.
+The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending/receiving. Screens target a 132×24 terminal; on each screen the BBS sends a best-effort xterm resize request to the client and keeps Bubble Tea's logical renderer at the same size. If the SSH client blocks remote window resizing, enable its window-operation permission or set the client window to 132×24 manually; SSH has no protocol-level server request for changing the local emulator window.
 
 ## Why This Shape
 

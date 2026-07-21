@@ -15,7 +15,7 @@ const (
 	receivedHistoryLimit        = 500
 	aprsReceiverRestartInterval = time.Hour
 	screenWidth                 = 132
-	screenHeight                = 43
+	screenHeight                = 24
 	panelBorderWidth            = 2
 	panelPaddingWidth           = 2
 	panelVerticalFrame          = 2
@@ -24,7 +24,7 @@ const (
 	panelContentHeight          = screenHeight - panelVerticalFrame
 	formInputWidth              = 72
 	formSingleLineMaxWidth      = 72
-	formTextAreaHeight          = 10
+	formTextAreaHeight          = 5
 	menuOptionColumnWidth       = 3
 )
 

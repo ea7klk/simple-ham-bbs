@@ -107,11 +107,9 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 }
 
 func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
-	for {
-		if !a.sendAPRSForm(callsign, profile, lang, "") {
-			return
-		}
-	}
+	// A completed send returns to the APRS menu. Retry handling stays inside
+	// sendAPRSForm, so this entry point must not reopen the send form.
+	_ = a.sendAPRSForm(callsign, profile, lang, "")
 }
 
 func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destination string) bool {

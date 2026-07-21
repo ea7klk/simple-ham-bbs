@@ -74,11 +74,11 @@ func runeKey(r rune) tea.KeyMsg {
 }
 
 func TestTerminalLayout(t *testing.T) {
-	if screenWidth != 132 || screenHeight != 43 {
-		t.Fatalf("terminal layout = %dx%d, want 132x43", screenWidth, screenHeight)
+	if screenWidth != 132 || screenHeight != 24 {
+		t.Fatalf("terminal layout = %dx%d, want 132x24", screenWidth, screenHeight)
 	}
-	if panelContentWidth != 128 || panelContentHeight != 41 {
-		t.Fatalf("panel content = %dx%d, want 128x41", panelContentWidth, panelContentHeight)
+	if panelContentWidth != 128 || panelContentHeight != 22 {
+		t.Fatalf("panel content = %dx%d, want 128x22", panelContentWidth, panelContentHeight)
 	}
 	for name, style := range map[string]lipgloss.Style{"panel": panelStyle, "form": formPanelStyle} {
 		view := style.Render("content")
@@ -86,7 +86,7 @@ func TestTerminalLayout(t *testing.T) {
 			t.Fatalf("%s panel size = %dx%d, want %dx%d", name, lipgloss.Width(view), lipgloss.Height(view), screenWidth, screenHeight)
 		}
 	}
-	if got := clientTerminalResizeSequence(); got != "\033[8;43;132t" {
+	if got := clientTerminalResizeSequence(); got != "\033[8;24;132t" {
 		t.Fatalf("resize sequence = %q", got)
 	}
 	msg := fixedTerminalSizeFilter(nil, tea.WindowSizeMsg{Width: 80, Height: 24}).(tea.WindowSizeMsg)

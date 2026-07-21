@@ -449,6 +449,48 @@ func TestAPRSMenusAndRows(t *testing.T) {
 	_ = time.Now()
 }
 
+func TestSendAPRSReturnsToMenuAfterSuccess(t *testing.T) {
+	a := testApp(t)
+	installBasicText(a)
+	for _, key := range []string{
+		"aprs_send_message", "aprs_destination_callsign", "aprs_destination_ssid", "aprs_text",
+		"aprs_invalid_destination", "aprs_invalid_ssid", "aprs_send_success", "aprs_parts",
+		"aprs_sent_status_sent", "aprs_sent_status_failed", "ok_button",
+	} {
+		a.text["en"][key] = key
+	}
+	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {Language: "en", EnableAPRS: true}}); err != nil {
+		t.Fatal(err)
+	}
+	a.cfg.aprsServer = "127.0.0.1"
+	a.cfg.aprsPort = 14580
+	packets := withFakeAPRSIS(t, 1)
+
+	formCalls := 0
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		formCalls++
+		if formCalls == 1 {
+			return "send", map[string]string{"destination": "EA1ABC", "destination_ssid": "", "text": "Hello"}, true
+		}
+		return "cancel", nil, false
+	}
+	menuChoices := []string{"3", "q"}
+	a.runMenuHook = func(lang, title, header string, opts []option) string {
+		choice := menuChoices[0]
+		menuChoices = menuChoices[1:]
+		return choice
+	}
+	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string { return "o" }
+
+	a.aprsMenu("EA7KLK", userProfile{Language: "en", EnableAPRS: true}, "en")
+	if formCalls != 1 {
+		t.Fatalf("send form opened %d times after successful send, want 1", formCalls)
+	}
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], "::EA1ABC   :Hello") {
+		t.Fatalf("APRS send packet = %#v", got)
+	}
+}
+
 func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 	a := testApp(t)
 	installBasicText(a)
