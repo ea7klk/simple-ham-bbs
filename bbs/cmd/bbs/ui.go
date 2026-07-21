@@ -670,11 +670,21 @@ func (m formModel) fieldLines(i int) int {
 }
 
 func (a *app) runMenu(lang, title, header string, opts []option) string {
+	return a.runMenuWithCursor(lang, title, header, opts, 0)
+}
+
+func (a *app) runMenuWithCursor(lang, title, header string, opts []option, cursor int) string {
 	if a.runMenuHook != nil {
 		return a.runMenuHook(lang, title, header, opts)
 	}
 	clearScreen()
-	m := menuModel{app: a, lang: lang, title: title, header: header, options: opts}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(opts) && len(opts) > 0 {
+		cursor = len(opts) - 1
+	}
+	m := menuModel{app: a, lang: lang, title: title, header: header, options: opts, cursor: cursor}
 	model, err := newTerminalProgram(m).Run()
 	if err != nil {
 		return "q"

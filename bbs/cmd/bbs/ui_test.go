@@ -158,6 +158,16 @@ func TestMenuModelUpdateAndView(t *testing.T) {
 	}
 }
 
+func TestMenuModelCanStartAtExistingMessage(t *testing.T) {
+	a := testUIApp()
+	m := menuModel{app: a, lang: "en", title: "Messages", options: []option{{"1", "One"}, {"2", "Two"}, {"3", "Three"}}, cursor: 2}
+	model, _ := m.Update(key("enter"))
+	chosen := model.(menuModel).chosen
+	if chosen != "3" {
+		t.Fatalf("menu initial cursor selected %q, want %q", chosen, "3")
+	}
+}
+
 func TestMenuModelPageNavigation(t *testing.T) {
 	a := testUIApp()
 	options := make([]option, 100)

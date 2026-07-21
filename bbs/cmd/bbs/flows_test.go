@@ -545,6 +545,12 @@ func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 	}
 
 	packets = withFakeAPRSIS(t, 1)
+	a.joinAPRSPH("EA7KLK", userProfile{EnableAPRS: true}, "en")
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], "::APRSPH   :CQ Checking in{") {
+		t.Fatalf("APRSPH packet=%#v", got)
+	}
+
+	packets = withFakeAPRSIS(t, 1)
 	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
 		return "send", map[string]string{"text": "Thursday check-in"}, true
 	}

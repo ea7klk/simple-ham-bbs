@@ -68,6 +68,7 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 }
 
 func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string) {
+	cursor := 0
 	for {
 		history := reverseReceived(a.trimReceived(callsign))
 		title := fmt.Sprintf("%d %s", len(history), a.t(lang, "aprs_received_messages"))
@@ -84,7 +85,10 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 			opts = append(opts, option{strconv.Itoa(i + 1), a.receivedAPRSListLabel(item)})
 		}
 		opts = append(opts, option{"q", a.t(lang, "back_button")})
-		choice := a.runMenu(lang, title, a.t(lang, "aprs_latest_received"), opts)
+		if cursor >= len(history) {
+			cursor = len(history) - 1
+		}
+		choice := a.runMenuWithCursor(lang, title, a.t(lang, "aprs_latest_received"), opts, cursor)
 		if choice == "q" {
 			return
 		}
@@ -93,6 +97,7 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 		if idx < 0 || idx >= len(history) {
 			continue
 		}
+		cursor = idx
 		action := a.showInfoActions(lang, a.t(lang, "aprs_received_message_detail"), a.aprsReceivedDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"r", a.t(lang, "reply_button")}, {"d", a.t(lang, "delete_button")}})
 		switch action {
 		case "d":
@@ -157,14 +162,18 @@ func (a *app) joinAPRSThursday(callsign string, profile userProfile, lang string
 		a.showInfoActions(lang, a.t(lang, "aprs_join_aprs_thursday"), [][]string{{a.t(lang, "aprs_not_thursday_warning")}}, []option{{"q", a.t(lang, "back_button")}})
 		return
 	}
-	a.sendANSRVRMessage(callsign, profile, lang, a.t(lang, "aprs_join_aprs_thursday"), "CQ HOTG")
+	a.sendAPRSServiceMessage(callsign, profile, lang, "ANSRVR", a.t(lang, "aprs_join_aprs_thursday"), "CQ HOTG")
 }
 
 func (a *app) joinAPRSPH(callsign string, profile userProfile, lang string) {
-	a.sendANSRVRMessage(callsign, profile, lang, a.t(lang, "aprs_join_aprsph"), "CQ")
+	a.sendAPRSServiceMessage(callsign, profile, lang, "APRSPH", a.t(lang, "aprs_join_aprsph"), "CQ")
 }
 
 func (a *app) sendANSRVRMessage(callsign string, profile userProfile, lang, title, prefix string) bool {
+	return a.sendAPRSServiceMessage(callsign, profile, lang, "ANSRVR", title, prefix)
+}
+
+func (a *app) sendAPRSServiceMessage(callsign string, profile userProfile, lang, destination, title, prefix string) bool {
 	for {
 		if !profile.EnableAPRS {
 			a.showInfo(lang, title, [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
@@ -177,8 +186,8 @@ func (a *app) sendANSRVRMessage(callsign string, profile userProfile, lang, titl
 			return false
 		}
 		text := prefix + " " + strings.TrimSpace(values["text"])
-		a.showSendingAPRS(lang, "ANSRVR")
-		sent, okSend := a.sendAPRSMessage(callsign, "ANSRVR", text, lang)
+		a.showSendingAPRS(lang, destination)
+		sent, okSend := a.sendAPRSMessage(callsign, destination, text, lang)
 		if !okSend {
 			detail := ""
 			if len(sent.Parts) > 0 {
@@ -201,6 +210,7 @@ func (a *app) sendANSRVRMessage(callsign string, profile userProfile, lang, titl
 }
 
 func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
+	cursor := 0
 	for {
 		history := reverseSent(a.trimSent(callsign))
 		if !profile.EnableAPRS {
@@ -216,7 +226,10 @@ func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
 			opts = append(opts, option{strconv.Itoa(i + 1), a.sentAPRSListLabel(item)})
 		}
 		opts = append(opts, option{"q", a.t(lang, "back_button")})
-		choice := a.runMenu(lang, a.t(lang, "aprs_sent_messages"), a.t(lang, "aprs_latest_sent"), opts)
+		if cursor >= len(history) {
+			cursor = len(history) - 1
+		}
+		choice := a.runMenuWithCursor(lang, a.t(lang, "aprs_sent_messages"), a.t(lang, "aprs_latest_sent"), opts, cursor)
 		if choice == "q" {
 			return
 		}
@@ -225,6 +238,7 @@ func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
 		if idx < 0 || idx >= len(history) {
 			continue
 		}
+		cursor = idx
 		action := a.showInfoActions(lang, a.t(lang, "aprs_sent_message_detail"), a.aprsSentDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
 		if action == "d" {
 			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
