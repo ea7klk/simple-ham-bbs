@@ -1,6 +1,8 @@
 # HAMNET Radio BBS
 
-A small, fully Dockerized SSH BBS for amateur radio operators. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
+A small SSH BBS for amateur radio operators, shipped as a container image. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
+
+The `compose.yaml` in this repository is the standalone/local way to run it. The production instance runs on k3s and is delivered by Fleet from a GitOps repository — see [Deployment](#deployment).
 
 The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending/receiving. Screens target a 132×24 terminal; on each screen the BBS sends a best-effort xterm resize request to the client and keeps Bubble Tea's logical renderer at the same size. If the SSH client blocks remote window resizing, enable its window-operation permission or set the client window to 132×24 manually; SSH has no protocol-level server request for changing the local emulator window.
 
@@ -10,10 +12,11 @@ This project uses OpenSSH as the transport and a small Go BBS application as the
 
 ## Files
 
-- `compose.yaml` runs WireGuard and the BBS containers.
+- `compose.yaml` runs WireGuard and the BBS containers for a standalone install.
 - `bbs/` contains the SSH server image and BBS application.
 - `bbs/cmd/bbs/` contains the Go BBS application.
 - `bbs/go.mod` declares the Charm terminal UI dependencies.
+- `.github/workflows/docker-image.yml` tests, builds and pushes the image.
 - `hamnet/wg0.conf.example` contains a safe, redacted WireGuard example.
 - `hamnet/wg_confs/` is ignored by git and should contain the real WireGuard config.
 - `bbs-data` is the Docker named volume that stores the SQLite database and logs.
@@ -196,21 +199,60 @@ Future APRS work can add:
 View logs:
 
 ```sh
-docker compose logs -f bbs
-docker compose logs -f hamnet
+kubectl -n ham-bbs logs -f deploy/bbs
+kubectl -n ham-bbs logs -f deploy/bbs-web
 ```
 
 Stop:
 
 ```sh
-docker compose down
+kubectl -n ham-bbs scale deploy/bbs --replicas=0
 ```
 
-If your machine has the older Compose command, use `docker-compose` in place of `docker compose`.
-
-Backup BBS data:
+Backup BBS data (the SQLite database and logs live on a host path):
 
 ```sh
-docker run --rm -v bbs-hamnet_bbs-data:/data -v "$PWD":/backup alpine \
-  tar -czf /backup/bbs-data-backup.tgz -C /data .
+tar -czf bbs-data-backup.tgz -C /opt/stacks/ham-bbs/data/bbs .
 ```
+
+## Deployment
+
+The cluster runs this BBS as a **k3s Deployment managed by Fleet**, not as a
+Docker Compose stack. There is no Docker daemon on the deployment host, so
+`docker compose` commands do not apply there.
+
+The source of truth is the GitOps repository:
+
+- Repository: `spainip/infra`
+- File: `fleet/managed-apps.yaml`
+- Bundle: `infra-fleet`, reconciled by Fleet into namespace `ham-bbs`
+
+The BBS image is pinned by digest, and Fleet has drift correction enabled. That
+has two consequences worth knowing before you try to ship a change:
+
+- `kubectl set image` and `kubectl rollout restart` are reverted on the next
+  reconcile. Change the digest in `spainip/infra` instead.
+- The `:latest` tag is published for convenience but is not what runs. The
+  pinned digest is.
+
+A release goes out in two steps:
+
+1. Publish a GitHub release. CI tests, then builds and pushes
+   `ghcr.io/ea7klk/simple-ham-bbs:<tag>` and `:latest` on GitHub-hosted runners,
+   and prints the published digest in the job summary.
+2. Pin that digest in `spainip/infra` `fleet/managed-apps.yaml`. If the
+   `INFRA_REPO_TOKEN` secret is configured (a fine-grained PAT with
+   `contents: write` on that repository), the workflow does this automatically;
+   otherwise copy the digest from the job summary and commit it by hand.
+
+To rebuild an image for a tag whose commit predates the current workflow (for
+example `v1.20`, published before the pipeline was fixed), run the workflow
+manually on the branch that has the fix:
+
+```sh
+gh workflow run docker-image.yml --ref main -f version=v1.20
+```
+
+`/opt/stacks/ham-bbs` on the host is legacy: it still holds the data and SSH
+bind paths that the Deployments mount, but its `compose.yaml` is not used and
+must not be treated as the deployment definition.
