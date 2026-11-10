@@ -29,7 +29,7 @@ does not prove their absence.
 - **Multi-user concurrency**: fixed. Every mutation writes only the rows it names, inside an immediate transaction, so a concurrent session cannot overwrite another's data.
 - **Terminal injection**: fixed. User text is now sanitised on input, on write, and on read, so stored escape sequences can no longer reach another user's terminal.
 - **Defaults**: guest mode is on by design and deletes the transport password, so the published placeholder is inert; accepted (H4).
-- **Dependency hygiene**: one reachable advisory; dependencies otherwise current.
+- **Dependency hygiene**: clean. `govulncheck` reports no reachable advisory after the x/text update (M5).
 - **Architecture**: workable at small scale. The persistence model was the source of the worst findings and is now row-level; the per-connection process model still forces every session to pay global startup cost.
 
 The two structural issues — H2 (whole-table rewrite from stale snapshots) and
@@ -410,40 +410,79 @@ block.
 
 ## Medium
 
-### M1. No rate limiting on BBS authentication; fail2ban only watches sshd
+### M1. No rate limiting on BBS authentication; fail2ban only watched sshd — FIXED (fail2ban removed)
 
-**Files:** `bbs/cmd/bbs/auth.go:18,75-80`, `bbs/fail2ban/jail.local:9-14`
+**Files (as found):** `bbs/cmd/bbs/auth.go`, `bbs/fail2ban/jail.local`
 
-`authenticate()` counts failures per callsign in memory, for the lifetime of one
-session. A new SSH connection resets the counter, and nothing links attempts
-across connections. fail2ban reads `/var/log/auth.log`, which receives only
-sshd events — the BBS's own "wrong password" events go to `bbs.log` and are
-never banned. With guest mode on there is no SSH password to guess at all, so
-fail2ban has nothing to see. Each attempt costs a 200k-iteration PBKDF2
-(`config.go:12`), so a single connection can also burn CPU cheaply.
+`authenticate()` counted failures per callsign in memory, for the lifetime of one
+session. A new SSH connection reset the counter, and nothing linked attempts
+across connections. fail2ban read `/var/log/auth.log`, which receives only sshd
+events — the BBS's own "wrong password" events go to `bbs.log` and were never
+banned. With guest mode on there is no SSH password to guess at all, so
+fail2ban had nothing to see. Each attempt costs a 200k-iteration PBKDF2, so a
+single connection could also burn CPU cheaply.
 
-**Fix:** persist attempt counters keyed by source address (the BBS can read
-`SSH_CONNECTION`) with a lockout window, and add a fail2ban filter for
-`/var/lib/bbs/bbs.log`. Prefer `argon2id` over PBKDF2-SHA256, and keep the
-iteration count in the stored hash so it can be raised later.
+**Fix (implemented 2026-11-10). fail2ban is gone, and the BBS throttles its own
+logins.**
 
-### M2. Inbound APRS traffic can force outbound connections without limit
+- Removed from the image and entrypoint: the Alpine package, `bbs/fail2ban/`
+  (both files), `/run/fail2ban`, `/var/log/fail2ban.log`, the
+  `fail2ban-server` background process, the `BBS_FAIL2BAN_LOG_FILE` config
+  field and its tailer. `iptables` was only there for fail2ban's banaction and
+  goes with it; `iproute2` stays for the fallback-route helper.
+- `dbAuthFailure` (`ratelimit.go`) stores failures keyed by the client address
+  from `SSH_CONNECTION`, in SQLite, so the counter is shared by every `bbs_app`
+  process instead of dying with the session.
+- Five failures within fifteen minutes lock the address for fifteen minutes. A
+  successful login clears it. Idle rows are pruned on the same nightly timer as
+  log rotation, so the table cannot grow unbounded.
+- `authenticate()` checks the lock before rendering the login form, so a locked
+  caller cannot keep prompting, and writes `login_lockout` to `bbs.log`.
+  Counter failures are logged and do not fail open — the per-session
+  three-attempt limit still applies.
+- When `SSH_CONNECTION` is absent (a local test, or a session started outside
+  sshd) all such callers share one bucket rather than escaping the limit.
 
-**Files:** `bbs/cmd/bbs/aprs_receiver.go:126-148`, `bbs/cmd/bbs/aprs.go:710-760`
+**Trade-off, stated plainly.** Removing fail2ban removes sshd-level brute-force
+protection. That is safe for this deployment because guest mode is on and there
+is no SSH password to guess; the application-level password prompt is what the
+new throttle protects. An operator who runs with `BBS_GUEST_MODE=false` should
+keep the port inside WireGuard and prefer `authorized_keys` over the transport
+password, since nothing now bans a repeat SSH offender.
+
+**Still open:** `argon2id` instead of PBKDF2-SHA256, and per-source limits on
+account *registration* (L2), which the same throttle table could serve.
+
+### M2. Inbound APRS traffic can force outbound connections without limit — FIXED
+
+**Files (as found):** `bbs/cmd/bbs/aprs_receiver.go`, `bbs/cmd/bbs/aprs.go`
 
 For every received APRS message that carries a message ID and is addressed to a
-user with `EnableAPRS=true`, the receiver calls `sendAPRSAck()`, which dials a
-**new** TCP connection to APRS-IS, logs in, writes one packet, and closes. There
-is no rate limit, no backoff, and no shared connection. APRS-IS is an open
-network and the receiver subscribes with `filter t/m`, so any station on the
-planet can generate that traffic. One inbound packet becomes one outbound
-dial with a 10 s connect timeout and 30 s deadline; a burst becomes a dial
-storm that also serialises the receive loop (the ack is sent synchronously
-before the packet is stored).
+user with `EnableAPRS=true`, the receiver called `sendAPRSAck()`, which dialled a
+**new** TCP connection to APRS-IS, logged in, wrote one packet, and closed. There
+was no rate limit, no backoff, and no shared connection. APRS-IS is an open
+network and the receiver subscribes with `filter t/m`, so any station could
+generate that traffic. One inbound packet became one outbound dial with a 10 s
+connect timeout and 30 s deadline, and because the ack was sent synchronously
+before the packet was stored, a burst also stalled the receive loop.
 
-**Fix:** keep one long-lived APRS-IS session for sending, or queue acks through a
-bounded worker with a token bucket and drop-with-log on overflow. Do not let
-untrusted inbound traffic allocate outbound sockets one-for-one.
+**Fix (implemented 2026-11-10).** Acknowledgements go through `aprsAckQueue`
+(`aprs_ack.go`):
+
+- A bounded queue of 64 pending acks; overflow is dropped, counted and logged
+  rather than blocking the scan loop.
+- One worker drains it, spacing sends at least 10 s apart, which caps outbound
+  dials at six per minute no matter the inbound rate.
+- Repeat acks for the same `(from, to, message ID)` are suppressed for ten
+  minutes.
+- The receive loop only enqueues, so packet handling is no longer serialised
+  behind network I/O.
+- Sent and dropped counters are logged when the receiver disconnects, so an
+  operator can see when inbound traffic outran the outbound budget.
+
+**Still open:** a single long-lived APRS-IS session for sending would cut latency
+and remove the per-ack login entirely; the bounded queue makes that an
+optimisation rather than a requirement.
 
 ### M3. CI ran fork pull requests on a self-hosted runner with workflow-wide `packages: write` — FIXED
 
@@ -497,36 +536,69 @@ something demonstrably needs it (LinuxServer's image uses it for `iptables`
 modules in some paths — verify, do not assume), and promote images by digest
 rather than by `latest`.
 
-### M5. Reachable dependency advisory in `golang.org/x/text`
+### M5. Reachable dependency advisory in `golang.org/x/text` — FIXED
 
-**File:** `bbs/go.mod:31` (indirect, `v0.21.0`)
+**File (as found):** `bbs/go.mod` (indirect, `v0.21.0`)
 
-`govulncheck` reports **GO-2026-5970** — infinite loop on invalid input in
+`govulncheck` reported **GO-2026-5970** — infinite loop on invalid input in
 `golang.org/x/text` — with a symbol trace through `gorm`'s initialisation
-(`cmd/bbs/aprs.go:13 → bbs.init → gorm.init → norm.Form.Properties`). Fixed in
-`v0.39.0`. The same scan found 23 advisories in required modules that this code
-does not appear to call.
+(`bbs.init → gorm.init → norm.Form.Properties`). The same scan found 23
+advisories in required modules that this code does not call.
 
-**Fix:** `go get golang.org/x/text@latest && go mod tidy`. While there, run
-`go mod tidy` — `go.mod` marks directly imported modules (`gorm.io/gorm`,
-`gorm.io/driver/sqlite`) as `// indirect`, which means the file has not been
-tidied since the imports changed.
+**Fix (implemented 2026-11-10).**
 
-### M6. Log rotation can drop records and duplicate them
+- `golang.org/x/text` v0.21.0 → **v0.39.0**, the release that carries the fix,
+  and `golang.org/x/sync` v0.10.0 → v0.21.0 alongside it.
+- v0.39.0 requires Go 1.25, so `go.mod` moves to `go 1.25.0` and the build stage
+  of the Dockerfile moves from `golang:1.22-alpine` to `golang:1.25-alpine`.
+  CI reads the version from `go.mod`, so it follows automatically.
+- `go mod tidy` now marks the directly imported modules (`gorm.io/gorm`,
+  `gorm.io/driver/sqlite`, lipgloss, bubbletea, bubbles, x/ansi) as direct
+  requirements; they had been annotated `// indirect` since the imports changed.
+- Go 1.25's vet flagged one pre-existing bug: `logBBSAction` was called with a
+  runtime-built string as its format argument in the sysop message editor. It is
+  now passed as `"%s", logDetail`. Every other call site was already constant.
 
-**Files:** `bbs/cmd/bbs/aprs_supervisor.go:113-158`, `:193-219`
+`govulncheck` now reports **no vulnerabilities reachable from this code**. It
+still lists 23 advisories in required modules that no symbol here calls; those
+are dependency-tree noise until a future import makes one reachable.
 
-`rotateLog()` copies the active file and then calls `Truncate(0)`. Anything
-appended between the copy and the truncate is lost — and appends to these files
-come from other processes (the receiver, every BBS session). There is no lock
+### M6. Log rotation can drop records and duplicate them — FIXED
+
+**Files (as found):** `bbs/cmd/bbs/aprs_supervisor.go`
+
+`rotateLog()` copied the active file and then called `Truncate(0)`. Anything
+appended between the copy and the truncate was lost — and appends to these files
+come from other processes (the receiver, every BBS session). There was no lock
 and no `rename`-based handoff. In the other direction, `tailLogFile()` resets
-its offset to zero when it observes a shrink, so post-rotation it re-emits
-whatever is left instead of resuming cleanly.
+its offset to zero when it observes a shrink, so post-rotation it re-emitted
+whatever was left instead of resuming cleanly.
 
-**Fix:** rename the active file and create a new one (or use `logrotate`/`s6`/
-Docker's own log driver, which already handles this). If the hand-rolled
-rotator stays, hold an exclusive `flock` across the copy-and-truncate window
-and have appenders take a shared lock.
+**Fix (implemented 2026-11-10). Rotation is a rename under a lock.**
+
+- An exclusive `flock` on a dedicated `<log>.lock` file serialises rotation.
+  The lock cannot live on the log itself, because the rename replaces that
+  inode: a waiter would wake holding the archived file and rotate an empty one
+  under a second name.
+- After the lock, the active file is stat'ed **by path**, renamed to its dated
+  archive, and a fresh file with the same permissions is created. If creating
+  the replacement fails, the archive is renamed back so appenders are never left
+  without a path.
+- No data can be dropped: `appendLogFile` opens the path on every write, so a
+  writer either lands before the rename (and correctly ends up in the archive)
+  or opens the new active file afterwards. Nothing is duplicated either, because
+  nothing is copied.
+- The tailer's shrink detection now does the right thing — the new active file is
+  empty, so it resumes from zero against the new inode.
+
+`filelock_unix.go` implements the lock with `syscall.Flock`;
+`filelock_other.go` is a no-op for non-unix builds, where rotation is
+single-process anyway.
+
+**Verification** (`logrotate_test.go`): the rename contract and file
+permissions, appends landing on the correct side of a rotation, the empty-log
+no-op leaving no stray archive, four rotations racing (exactly one may claim the
+payload, and no archive is left empty), and the tailer's offset reset.
 
 ### M7. Persistence errors are discarded, so success is reported when nothing was written — FIXED IN THE REWRITTEN PATHS
 
@@ -552,20 +624,34 @@ ignore their load errors (`bulletins, _ := a.loadBulletins()`), so a failed read
 still renders as an empty list rather than an error. That is a read-path
 decision, not a lost write.
 
-### M8. Unbounded reply depth
+### M8. Unbounded reply depth — FIXED
 
-**Files:** `boards.go:176-179`, `boards.go:237-251`, `boards.go:91-105`
+**Files (as found):** `bbs/cmd/bbs/boards.go`
 
-The 500-message cap applies only to top-level messages
-(`len(data.Boards[boardIdx].Messages) > 500`). Replies are appended without
-limit, and `flattenMessages`, `saveMessageRows`, `totalMessages`, and
-`deleteMessageAtPath` all recurse over that structure. A user who replies
-repeatedly produces a thread whose depth is bounded only by patience; rendering
-it into a 22-line panel costs `O(depth²)` label construction, and the recursion
-costs stack.
+The 500-message cap applied only to top-level messages. Replies were appended
+without limit, and `flattenMessages`, `saveMessageRows`, `totalMessages` and
+`deleteMessageAtPath` all recurse over the tree, so a user who replied
+repeatedly produced a thread bounded only by patience; rendering it into a
+22-line panel cost `O(depth²)` label construction.
 
-**Fix:** cap thread depth (3–5 levels is normal for a BBS) at write time, and
-count replies toward the same 500-message budget.
+**Fix (implemented 2026-11-10). Nesting is capped at five levels.**
+
+- `maxReplyDepth = 5` (`config.go`): a thread is at most six rows — a root plus
+  five nested replies.
+- The cap is enforced in the storage layer (`createMessageRow` →
+  `messageDepth`), which walks the parent chain in SQL with a hard bound so a
+  corrupt parent chain terminates instead of looping. A caller that bypasses the
+  form hits the same wall.
+- `loadBoardMessages` derives each message's `Depth`; `readMessage` drops the
+  reply action at the limit, and `replyToMessage` shows a translated
+  `thread_too_deep` message rather than a raw error.
+
+**The per-board budget is unchanged and stays top-level only, as intended:**
+replies are bounded by depth rather than by count, so a deep thread never
+consumes the 500-message allowance. `TestRepliesDoNotCountTowardMessageBudget`
+pins it: a board holding 500 top-level messages plus a full-depth thread
+survives a trim untouched, and the 501st top-level message drops only the oldest
+thread.
 
 ---
 
@@ -748,13 +834,13 @@ claim is honest.
    intended** (see H4: guest mode deletes the transport password, so the
    placeholder is never applied; the config hazard only exists with guest mode
    off).
-5. **M5** — dependency update; ~~M7~~ — **done** in the paths H2 rewrote (see
-   M7; read paths still ignore load errors).
-6. **M1, M2** — rate limits at the two places untrusted input arrives (BBS
-   login, APRS inbound).
+5. ~~**M5** — dependency update~~ — **done**; ~~**M7**~~ — **done** in the paths
+   H2 rewrote (see M7; read paths still ignore load errors).
+6. ~~**M1, M2** — rate limits at the two places untrusted input arrives (BBS
+   login, APRS inbound)~~ — **done** (see M1 and M2).
 7. ~~**M3** — CI runner and permission hardening~~ — **done** (see M3);
    **M4** — image pinning is still open.
-8. **M6, M8, L1–L11** — hygiene.
+8. ~~**M6, M8**~~ — **done** (see their sections); **L1–L11** — hygiene.
 
 ## Limits
 

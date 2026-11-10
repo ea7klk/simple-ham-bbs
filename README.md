@@ -82,6 +82,7 @@ The SSH account is only the transport. The BBS has its own callsign-based accoun
 - Profile changes are available from `Change my profile`, including password changes with matching password fields.
 - Interactive terminals can use cursor keys and Enter for menus; dialog-style forms use Tab to move between fields/buttons, direct typing to edit, the Save/Cancel buttons, and F2 as a save shortcut. Long message text fields word-wrap, and Up/Down scroll within the text field instead of moving form focus. Scripted/non-interactive sessions can still type menu numbers and field values.
 - Menu translations live in `bbs/translations.json`, separate from the main BBS application code.
+- Five failed BBS passwords from one address within fifteen minutes lock that address out for fifteen minutes. The counter is shared by all sessions, so reconnecting does not reset it.
 
 Sysop users can administer accounts from the sysop menu:
 
@@ -169,6 +170,10 @@ callsign with SSID `-0` and calculates the APRS-IS passcode automatically.
 Messages longer than the APRS message body limit are split into numbered parts
 before sending.
 
+Threads nest at most five replies deep. Only top-level messages count toward the
+500-message per-board budget, so a deep thread never uses up the message
+allowance.
+
 Users, bulletins, local boards, threaded messages, and APRS history are stored
 in SQLite through GORM. The default database path is:
 
@@ -197,7 +202,10 @@ preserved as received. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
 receive-only APRS-IS login callsign; if it is empty, the receiver uses the
 first valid callsign from `BBS_SYSOPS`, then falls back to `N0CALL`. The
 receiver exits once per hour; the supervisor restarts it so the APRS-IS
-connection is refreshed regularly.
+connection is refreshed regularly. Acknowledgements for received messages are
+queued instead of dialled inline: the queue holds 64, sends at most one every
+ten seconds, and drops (with a logged count) when inbound traffic outruns that
+budget, so no third party can turn inbound packets into an outbound dial storm.
 
 APRS send attempts, generated packets, APRS-IS login responses, and receiver
 activity are appended to `/var/lib/bbs/aprs/aprs.log`. BBS user and sysop
