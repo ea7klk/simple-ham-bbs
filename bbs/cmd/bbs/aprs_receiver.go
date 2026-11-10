@@ -81,6 +81,15 @@ func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) e
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	multipart := map[string]*aprsMultipartBuffer{}
+
+	// Acknowledgements are queued, not dialled inline: inbound traffic must not
+	// be able to allocate outbound connections one-for-one.
+	acks := newAPRSAckQueue(a)
+	acks.Start()
+	defer func() {
+		acks.Stop()
+		a.logAPRSReceiver("APRS receiver goodbye: %s", acks.queueSummary())
+	}()
 	for scanner.Scan() {
 		line := strings.TrimRight(scanner.Text(), "\r\n")
 		if strings.TrimSpace(line) == "" {
@@ -131,12 +140,9 @@ func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) e
 			if err != nil {
 				a.logAPRSReceiver("APRS ack eligibility error to=%s id=%s: %v", msg.To, msg.MessageID, err)
 			} else if enabled {
-				if err := a.sendAPRSAck(msg.To, msg.From, msg.MessageID); err != nil {
-					a.logAPRSReceiver("APRS ack send error user=%s from=%s to=%s id=%s: %v", user, msg.To, msg.From, msg.MessageID, err)
-					a.logBBSAction(user, "aprs_ack_send_failed", "from=%q to=%q id=%q error=%q", msg.To, msg.From, msg.MessageID, err.Error())
-				} else {
-					a.logAPRSReceiver("APRS ack sent user=%s from=%s to=%s id=%s", user, msg.To, msg.From, msg.MessageID)
-					a.logBBSAction(user, "aprs_ack_sent", "from=%q to=%q id=%q", msg.To, msg.From, msg.MessageID)
+				req := aprsAckRequest{User: user, From: msg.From, To: msg.To, MessageID: msg.MessageID}
+				if !acks.Enqueue(req) {
+					a.logAPRSReceiver("APRS ack dropped from=%s to=%s id=%s: %s", msg.From, msg.To, msg.MessageID, acks.queueSummary())
 				}
 			}
 		}
