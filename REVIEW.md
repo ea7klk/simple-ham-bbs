@@ -345,28 +345,40 @@ before the packet is stored).
 bounded worker with a token bucket and drop-with-log on overflow. Do not let
 untrusted inbound traffic allocate outbound sockets one-for-one.
 
-### M3. CI runs fork pull requests on a self-hosted runner with workflow-wide `packages: write`
+### M3. CI ran fork pull requests on a self-hosted runner with workflow-wide `packages: write` — FIXED
 
-**Files:** `.github/workflows/docker-image.yml:16-18,27,81,131-141`
+**Files (as found):** `.github/workflows/docker-image.yml`
 
-`pull_request` triggers the `test` job (`:9-10`) on `runs-on: self-hosted`
-(`:27`). Any pull request from a fork executes arbitrary Go code on that
-runner, which is a persistent host, not an ephemeral VM. `permissions` grants
-`packages: write` at workflow scope rather than to the `docker` job that needs
-it. Actions are pinned to major tags (`actions/checkout@v7`,
-`docker/build-push-action@v7`) rather than commit SHAs. The `deploy` job runs
-`docker compose pull/down/up` in `/opt/stacks/ham-bbs` on the same host.
+`pull_request` triggered the `test` job on `runs-on: self-hosted`. Any pull
+request from a fork executed arbitrary Go code on that runner, which is a
+persistent host, not an ephemeral VM. `permissions` granted `packages: write`
+at workflow scope rather than to the `docker` job that needs it. Actions were
+pinned to major tags (`actions/checkout@v7`, `docker/build-push-action@v7`)
+rather than commit SHAs. The `deploy` job ran `docker compose pull/down/up` in
+`/opt/stacks/ham-bbs` on the same host.
 
-**Why it matters:** a malicious fork PR gets code execution on the machine that
-holds the deploy stack and the registry credentials used by later jobs. Even
-without secrets exposed to `pull_request` from forks, runner compromise is
-enough to reach the Docker socket and the deploy directory.
+**Why it mattered:** a malicious fork PR got code execution on the machine that
+held the deploy stack and the registry credentials used by later jobs.
 
-**Fix:** run PR builds on `ubuntu-latest` and reserve `self-hosted` for
-`release` events only; scope `packages: write` to the `docker` job; pin actions
-to SHAs with a dependency updater; require approval for fork workflows
-(`Environment` with required reviewers) and keep the deploy job in a separate
-workflow gated by environment protection.
+**Fix (implemented 2026-11-10).** Every job now runs on `ubuntu-latest`, so no
+pull request reaches a persistent host. `permissions: contents: read` is set at
+workflow level and `packages: write` is granted to the `docker` job alone. Each
+action is pinned to a commit SHA with the version in a trailing comment. The
+`deploy` job is gone — it could never have worked on this host, which has no
+Docker daemon — and is replaced by a `pin` job that updates the digest in the
+GitOps repository Fleet reconciles (see the Deployment section of `README.md`).
+That job only runs when an `INFRA_REPO_TOKEN` secret is configured and otherwise
+records the digest for a manual pin, so a fork PR still cannot reach the
+deployment repository.
+
+Also fixed in the same workflow: stale branch runs are cancelled
+(`cancel-in-progress` for non-release events) so the queue cannot fill with
+superseded work, `timeout-minutes` bounds every job, and the duplicate
+`tags: "*"` push trigger is removed.
+
+**Residual:** branch protection does not currently require the `pin` job, and
+`actions/dependency-review-action` or a scheduled SHA updater is still the right
+way to keep the pinned SHAs current. Neither was added here.
 
 ### M4. Unpinned `:latest` images with broad capabilities
 
@@ -638,7 +650,8 @@ claim is honest.
    M7; read paths still ignore load errors).
 6. **M1, M2** — rate limits at the two places untrusted input arrives (BBS
    login, APRS inbound).
-7. **M3, M4** — CI and image pinning.
+7. ~~**M3** — CI runner and permission hardening~~ — **done** (see M3);
+   **M4** — image pinning is still open.
 8. **M6, M8, L1–L11** — hygiene.
 
 ## Limits
