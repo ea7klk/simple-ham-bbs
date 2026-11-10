@@ -76,7 +76,7 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 		}
 		p := users[key]
 		role := a.t(lang, "user_role")
-		if a.isSysop(key, p) {
+		if a.isSysop(p) {
 			role = a.t(lang, "sysop_role")
 		}
 		status := a.t(lang, "enabled")
@@ -150,7 +150,7 @@ func (a *app) editUserDetail(current, lang string, users map[string]userProfile,
 		return
 	}
 	a.logBBSAction(current, "user_update", "target=%q disabled=%t", target, updated.Disabled)
-	a.showInfo(lang, a.t(lang, "user_updated"), userDetailRows(a, lang, target, updated, a.isSysop(target, updated)))
+	a.showInfo(lang, a.t(lang, "user_updated"), userDetailRows(a, lang, target, updated, a.isSysop(updated)))
 }
 
 func (a *app) userDetailFields(lang string, profile userProfile) []formField {
@@ -232,10 +232,10 @@ func deleteAPRSHistoryRow(tx *gorm.DB, key string) error {
 
 func (a *app) wouldRemoveLastSysopWithProfile(users map[string]userProfile, callsign string, profile userProfile) bool {
 	current, ok := users[callsign]
-	if !ok || !a.isSysop(callsign, current) || current.Disabled {
+	if !ok || !a.isSysop(current) || current.Disabled {
 		return false
 	}
-	if a.isSysop(callsign, profile) && !profile.Disabled {
+	if a.isSysop(profile) && !profile.Disabled {
 		return false
 	}
 	count := 0
@@ -243,7 +243,7 @@ func (a *app) wouldRemoveLastSysopWithProfile(users map[string]userProfile, call
 		if key == callsign {
 			continue
 		}
-		if a.isSysop(key, value) && !value.Disabled {
+		if a.isSysop(value) && !value.Disabled {
 			count++
 		}
 	}
@@ -256,15 +256,14 @@ func (a *app) toggleSysop(current, lang string, users map[string]userProfile) {
 		return
 	}
 	p := users[target]
-	if a.cfg.sysops[target] {
-		a.showInfo(lang, a.t(lang, "cannot_demote_configured"), [][]string{{target}})
-		return
-	}
-	if a.isSysop(target, p) && a.wouldRemoveLastSysop(users, target) {
+	// BBS_SYSOPS is only a bootstrap grant; once a sysop exists the configured
+	// list has no authority, so a bootstrapped sysop can be demoted like any
+	// other (subject to the last-sysop guard below).
+	if a.isSysop(p) && a.wouldRemoveLastSysop(users, target) {
 		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
 		return
 	}
-	p.IsSysop = !a.isSysop(target, p)
+	p.IsSysop = !a.isSysop(p)
 	if p.IsSysop {
 		p.Disabled = false
 	}

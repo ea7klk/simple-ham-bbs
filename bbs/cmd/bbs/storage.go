@@ -64,9 +64,42 @@ func (a *app) loadUser(callsign string) (userProfile, bool, error) {
 	return profileFromRow(row), true, nil
 }
 
-// applyConfiguredSysops flags accounts listed in BBS_SYSOPS and returns the
+// hasActiveSysop reports whether any enabled account already holds the sysop
+// role.
+func hasActiveSysop(users map[string]userProfile) bool {
+	for _, profile := range users {
+		if profile.IsSysop && !profile.Disabled {
+			return true
+		}
+	}
+	return false
+}
+
+// storedActiveSysops counts enabled accounts that hold the sysop role in the
+// database, rather than in whatever snapshot the caller is holding.
+func (a *app) storedActiveSysops() (int64, error) {
+	var count int64
+	err := a.db.Model(&dbUser{}).Where("is_sysop = ? AND disabled = ?", true, false).Count(&count).Error
+	return count, err
+}
+
+// applyConfiguredSysops promotes accounts listed in BBS_SYSOPS and returns the
 // callsigns it changed, so the caller can persist exactly those rows.
+//
+// BBS_SYSOPS is a bootstrap mechanism, not a standing grant: once the BBS has
+// any active sysop, the configured list confers nothing. Without that rule a
+// configured callsign stayed permanently privileged, so anyone who registered
+// it (callsigns cannot be verified) inherited the sysop menu forever.
 func (a *app) applyConfiguredSysops(users map[string]userProfile) []string {
+	if hasActiveSysop(users) {
+		return nil
+	}
+	// The map was read before this session's first screen, so another session may
+	// have bootstrapped in the meantime. Confirm against the database, and treat
+	// an unreadable count as "a sysop exists": never grant on doubt.
+	if count, err := a.storedActiveSysops(); err != nil || count > 0 {
+		return nil
+	}
 	changed := []string{}
 	for callsign := range a.cfg.sysops {
 		if profile, ok := users[callsign]; ok && !profile.IsSysop {
@@ -79,18 +112,35 @@ func (a *app) applyConfiguredSysops(users map[string]userProfile) []string {
 	return changed
 }
 
-func (a *app) isSysop(callsign string, profile userProfile) bool {
-	return a.cfg.sysops[callsign] || profile.IsSysop
+// isBootstrapSysop reports whether callsign may be granted sysop because it is
+// listed in BBS_SYSOPS and the deployment has no active sysop yet. It fails
+// closed: if the count cannot be read, no role is granted.
+func (a *app) isBootstrapSysop(callsign string) bool {
+	if !a.cfg.sysops[normalizeCallsign(callsign)] {
+		return false
+	}
+	count, err := a.storedActiveSysops()
+	if err != nil {
+		return false
+	}
+	return count == 0
+}
+
+// isSysop answers from the stored profile alone. BBS_SYSOPS is deliberately not
+// consulted here: it is used once, to bootstrap the first sysop, and has no
+// authority afterwards.
+func (a *app) isSysop(profile userProfile) bool {
+	return profile.IsSysop
 }
 
 func (a *app) wouldRemoveLastSysop(users map[string]userProfile, callsign string) bool {
 	profile := users[callsign]
-	if !a.isSysop(callsign, profile) || profile.Disabled {
+	if !a.isSysop(profile) || profile.Disabled {
 		return false
 	}
 	count := 0
-	for key, p := range users {
-		if a.isSysop(key, p) && !p.Disabled {
+	for _, p := range users {
+		if a.isSysop(p) && !p.Disabled {
 			count++
 		}
 	}

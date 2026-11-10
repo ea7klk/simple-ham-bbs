@@ -108,7 +108,6 @@ func installBasicText(a *app) {
 		"user_deleted":                "User deleted",
 		"cannot_manage_self":          "Cannot manage self",
 		"cannot_remove_last_sysop":    "Cannot remove last sysop",
-		"cannot_demote_configured":    "Cannot demote configured",
 		"confirm_delete_user":         "Delete user %s?",
 		"confirm_delete_field":        "Confirm deletion",
 		"sysop":                       "Sysop",

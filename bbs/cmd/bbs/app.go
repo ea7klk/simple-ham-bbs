@@ -146,11 +146,11 @@ func (a *app) run() error {
 		lang = "en"
 	}
 	a.currentUser = callsign
-	a.logBBSAction(callsign, "login", "sysop=%t", a.isSysop(callsign, profile))
+	a.logBBSAction(callsign, "login", "sysop=%t", a.isSysop(profile))
 	a.sendLoginAPRSBeacon(callsign, profile)
 	for {
 		header := fmt.Sprintf("%s %s", a.t(lang, "logged_in_as"), callsign)
-		if a.isSysop(callsign, profile) {
+		if a.isSysop(profile) {
 			header += " [" + a.t(lang, "sysop_role") + "]"
 		}
 		header += "    " + a.t(lang, "sysop") + ": " + a.cfg.sysopName
@@ -163,7 +163,7 @@ func (a *app) run() error {
 			{"6", a.t(lang, "menu_aprs")},
 			{"7", a.t(lang, "menu_about")},
 		}
-		if a.isSysop(callsign, profile) {
+		if a.isSysop(profile) {
 			opts = append(opts, option{"8", a.t(lang, "menu_sysop")})
 		}
 		opts = append(opts, option{"q", a.t(lang, "menu_quit")})
@@ -185,7 +185,7 @@ func (a *app) run() error {
 		case "7":
 			a.about(lang)
 		case "8":
-			if a.isSysop(callsign, profile) {
+			if a.isSysop(profile) {
 				a.sysopMenu(callsign, lang)
 			}
 		case "q":

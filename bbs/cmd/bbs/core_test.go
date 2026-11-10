@@ -94,11 +94,16 @@ func TestStorageUsersPasswordsAndJSON(t *testing.T) {
 	p := loaded["EA7KLK"]
 	p.IsSysop = false
 	loaded["EA7KLK"] = p
+	// Persist the demotion so the bootstrap check sees a database with no active
+	// sysop, which is the state BBS_SYSOPS is allowed to fill.
+	if err := a.saveUser("EA7KLK", p); err != nil {
+		t.Fatal(err)
+	}
 	a.cfg.sysops = map[string]bool{"EA1ABC": true, "EA7KLK": true}
 	if changed := a.applyConfiguredSysops(loaded); len(changed) != 1 || changed[0] != "EA7KLK" {
 		t.Fatalf("applyConfiguredSysops() = %v, want [EA7KLK]", changed)
 	}
-	if !a.isSysop("EA7KLK", loaded["EA7KLK"]) {
+	if !a.isSysop(loaded["EA7KLK"]) {
 		t.Fatal("configured/profile sysop not detected")
 	}
 	if !a.wouldRemoveLastSysop(map[string]userProfile{"EA7KLK": {IsSysop: true}}, "EA7KLK") {

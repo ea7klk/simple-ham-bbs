@@ -95,7 +95,7 @@ func (a *app) register(callsign string, profile userProfile, forcePassword bool)
 	if profile.FirstSeen == "" {
 		profile.FirstSeen = now()
 	}
-	profile.IsSysop = profile.IsSysop || a.cfg.sysops[callsign]
+	profile.IsSysop = profile.IsSysop || a.isBootstrapSysop(callsign)
 	for {
 		fields := a.profileFields(profile, true, forcePassword || profile.PasswordHash == "")
 		_, values, ok := a.runForm(profile.Language, a.t(profile.Language, "registration_form_title")+" - "+callsign, fields, []string{"save", "cancel"})

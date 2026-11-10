@@ -94,13 +94,29 @@ Sysop users can administer accounts from the sysop menu:
 - Sysops cannot delete or disable their own account.
 - The BBS prevents removal of the last active sysop.
 
-Bootstrap one or more sysops from `.env` with a comma-separated callsign list:
+Bootstrap a sysop from `.env` with a comma-separated callsign list:
 
 ```sh
 BBS_SYSOPS=EA1ABC,DL1ABC
 ```
 
-Calls listed in `BBS_SYSOPS` are always treated as sysops and cannot be demoted from inside the BBS.
+`BBS_SYSOPS` is a **bootstrap only**: it is read while the BBS has no active
+sysop at all, and the first listed callsign that logs in is granted the role.
+As soon as any active sysop exists, the variable is ignored completely, so a
+listed callsign that registers later gets an ordinary account.
+
+Two consequences worth knowing before you expose the port:
+
+- Register your sysop callsign immediately after the first start, before anyone
+  else can. Until an account holds the role, the bootstrap grant is available to
+  whoever claims a listed callsign first.
+- Once bootstrapped, a sysop is an ordinary sysop: they can be demoted from the
+  sysop menu like anyone else, subject to the last-active-sysop guard. Remove
+  the entry from `BBS_SYSOPS` afterwards if you do not want it lying around.
+
+There is no reliable way to verify that a caller owns the callsign they type.
+Anyone can claim any callsign that does not yet have an account, so treat BBS
+accounts as unverified pseudonyms rather than identities.
 
 The local message board feature supports multiple boards. New installs start with a `General` board. Existing installs with the older flat `messages.json` format are migrated automatically into the `General` board the next time the BBS starts.
 

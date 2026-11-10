@@ -25,7 +25,7 @@ does not prove their absence.
 
 ## Summary
 
-- **Trust model**: broken at the root. A callsign is an identity here, and the BBS lets anyone claim any callsign.
+- **Trust model**: still unverified. A callsign is not a credential and cannot be validated, so anyone can claim an unregistered one; the permanent sysop grant from `BBS_SYSOPS` is fixed (H1).
 - **Multi-user concurrency**: fixed. Every mutation writes only the rows it names, inside an immediate transaction, so a concurrent session cannot overwrite another's data.
 - **Terminal injection**: fixed. User text is now sanitised on input, on write, and on read, so stored escape sequences can no longer reach another user's terminal.
 - **Defaults**: one publicly known SSH password away from a session on port 2222.
@@ -34,16 +34,18 @@ does not prove their absence.
 
 The two structural issues — H2 (whole-table rewrite from stale snapshots) and
 the per-connection process model — accounted for most of the exploitable impact.
-H2 and H3 are fixed in this tree; their sections record the mechanism and the
-evidence. H1 remains the most serious open finding.
+H1, H2 and H3 are fixed or mitigated in this tree; their sections record the
+mechanism, the evidence and what was deliberately left open. Callsign ownership
+verification is the one finding that cannot be closed by code, and it is
+documented as follow-up work.
 
 ---
 
 ## High
 
-### H1. Anyone can claim any callsign, and the first claimant of a `BBS_SYSOPS` callsign becomes a sysop
+### H1. Anyone can claim any callsign, and the first claimant of a `BBS_SYSOPS` callsign becomes a sysop — PARTIALLY FIXED
 
-**Files:** `bbs/cmd/bbs/auth.go:35-44`, `bbs/cmd/bbs/storage.go:89-100`,
+**Files (as found):** `bbs/cmd/bbs/auth.go:35-44`, `bbs/cmd/bbs/storage.go:89-100`,
 `bbs/cmd/bbs/aprs.go:611-624`, `bbs/cmd/bbs/app.go:20-34`, `bbs/cmd/bbs/app.go:49-56`
 
 **Reachable path:** SSH login → `authenticate()` → callsign not in `users` →
@@ -71,15 +73,83 @@ distinct impacts follow from one root cause:
    by its password, so this is not a takeover of *established* accounts — but
    every callsign that has not logged in yet is claimable.
 
-**Fix:** introduce a real ownership step before an account becomes
-identity-bearing. Minimum viable: require a sysop-approved registration queue,
-or issue binding tokens out of band (a signed packet, a postcard, a
-`/etc/bbs/allowed_callsigns` list). At a minimum, do not auto-grant sysop from
-`BBS_SYSOPS`; require the configured callsign to complete an explicit
-bootstrap (for example, a generated one-time token printed to container logs on
-first start) before it gets the role. Document the bootstrap race in
-`README.md` in the strongest terms and require an explicit
-`BBS_ALLOW_SELF_REGISTRATION=true` for the current behaviour.
+**Fix (implemented 2026-11-10): the persistent grant is gone; a real ownership
+step is still missing.**
+
+`BBS_SYSOPS` is now a bootstrap mechanism rather than a standing grant:
+
+- `isSysop(profile)` (`storage.go`) answers from the stored row alone. The
+  configured map is no longer consulted on the request path, so a callsign
+  listed in `BBS_SYSOPS` has no authority unless an account actually holds
+  `IsSysop` in the database.
+- `applyConfiguredSysops(users)` promotes configured accounts only while
+  no enabled account holds the role. It checks the caller's snapshot and then
+  confirms against the database, so a stale snapshot from before another
+  session bootstrapped cannot grant the role again; an unreadable count counts
+  as "a sysop exists".
+- `isBootstrapSysop(callsign)` gates the registration path with a database
+  count of active sysops and **fails closed**: if the count cannot be read, the
+  role is not granted.
+- The `cannot_demote_configured` guard in `toggleSysop` is removed (with its
+  translations), because a bootstrapped sysop is now an ordinary sysop. The
+  last-active-sysop guard still prevents locking the BBS out.
+
+Impact: the "register a configured callsign months later and receive the sysop
+menu" path is closed. An attacker registering `EA1ABC` on a BBS that already has
+a sysop now gets a plain account, and `README.md` and `.env.example` document
+the bootstrap-window rule and the demotion behaviour.
+
+**Verification.** `bbs/cmd/bbs/sysop_bootstrap_test.go` covers the bootstrap
+grant, the ignore-once-a-sysop-exists rule, disabled-sysop handling,
+`hasActiveSysop`, registration through `authenticate()` in both directions, a
+bootstrapped sysop being demotable, the last-sysop guard, a configured callsign
+with no account, fail-closed behaviour when the database is closed, and a stale
+snapshot that must not re-bootstrap over a stored sysop. The
+registration test was checked for sensitivity: restoring the old
+"always grant from the configured list" behaviour makes it fail with
+`registration handed sysop to a configured callsign while a sysop existed`.
+
+**What is NOT fixed, and cannot be fixed here: there is no reliable way to
+assess the validity of a callsign.**
+
+A callsign is not a credential. Amateur callsigns are published in public
+databases, they cannot be proven by typing them, and there is no service this
+BBS can call that would tell it "this caller is the licensee of `EA1ABC`". Any
+check available at login time — format, an allow-list, a lookup against a
+public database — only confirms that the string exists, not who is typing it.
+Sending a verification token would need a channel to the licensee that this
+deployment does not have (no verified email, no postal address, no signed
+packet path). The practical consequence is unchanged:
+
+1. **Any callsign without an account can still be claimed by the first caller
+   who types it.** That includes, during the bootstrap window, the callsign
+   listed in `BBS_SYSOPS` — mitigated by registering the sysop immediately after
+   first start, not eliminated.
+2. **Transmission as another station.** `sendAPRSMessage` derives the APRS-IS
+   passcode from the logged-in callsign (`aprsPasscode(from)`, `aprs.go:611-624`)
+   and transmits under it, and `sendLoginAPRSBeacon` beacons that station's
+   position at every login. APRS passcodes are a public function of the
+   callsign, so this is not a bug in the derivation — it is the protocol, and it
+   is why APRS-IS treats the passcode as anti-noise, not authentication.
+3. **Account takeover of a returning user** remains impossible while the
+   account has a password, which is the only real credential in the system.
+
+Until ownership can be verified, the honest framing is that a BBS account is an
+**unverified pseudonym**, and the deployment must be sized accordingly
+(rate limits, guest mode off, APRS disabled for unverified users).
+
+**Left as follow-up work.** None of these are implemented, and each is a design
+decision rather than a patch:
+
+- A registration approval queue: new accounts are created disabled and a sysop
+  enables them, using whatever out-of-band contact the operator already has.
+- Out-of-band binding tokens (a signed packet over the air, a postcard code, a
+  club-membership list) that unlock a callsign after a one-time code is entered.
+- Limiting new self-registrations per source address and per hour, so claiming
+  many callsigns is expensive.
+- Making `Enable APRS` opt-in by a sysop rather than self-service, since APRS is
+  the only place where an unverified callsign causes damage outside this
+  service.
 
 ### H2. Every write rewrites the whole table from a stale snapshot; concurrent sessions destroy each other's data — FIXED
 
@@ -640,8 +710,8 @@ claim is honest.
 
 1. ~~**H2** — row-level persistence~~ — **done** (see H2: single-row writes,
    immediate transactions, row-level tests, and a sensitivity check).
-2. **H1** — stop auto-granting sysop from `BBS_SYSOPS`, and decide how a
-   callsign is proven.
+2. ~~**H1** — stop auto-granting sysop from `BBS_SYSOPS`~~ — **done**; callsign
+   ownership verification is **left open** (see H1, "Left as follow-up work").
 3. ~~**H3** — sanitise user text at the storage boundary~~ — **done** (see H3:
    one rule, enforced on input, write, read, and startup, with regression tests).
 4. **H4** — refuse to start on the placeholder password; scope

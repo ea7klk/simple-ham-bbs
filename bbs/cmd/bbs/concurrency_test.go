@@ -181,9 +181,11 @@ func TestLoginDoesNotRewriteOtherAccounts(t *testing.T) {
 		}
 	}
 
+	// A sysop already exists, so BBS_SYSOPS has no authority and must not be
+	// applied. Nobody's row may be rewritten by a login either.
 	alice, _, _ := a.loadUser("EA1ABC")
-	if !alice.IsSysop {
-		t.Fatalf("configured sysop was not promoted: %#v", alice)
+	if alice.IsSysop {
+		t.Fatalf("configured callsign was promoted while a sysop already existed: %#v", alice)
 	}
 	volker, _, _ := a.loadUser("EA7KLK")
 	if !volker.IsSysop || volker.LastSeen != "2026-01-01 00:00 UTC" {
