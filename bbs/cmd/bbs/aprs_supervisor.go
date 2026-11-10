@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -114,42 +115,62 @@ func (a *app) rotateRuntimeLogs(now time.Time) error {
 	return nil
 }
 
+// rotateLog archives the active file by renaming it and creating a fresh one.
+//
+// The previous implementation copied the file and then truncated it, so every
+// append that landed between the copy and the truncate was lost — and appends
+// come from other processes (the receiver, every BBS session). Renaming has no
+// such window: a writer either appends before the rename (into the archive,
+// which is correct) or opens the newly created active file afterwards. Every
+// append goes through a fresh open, so no writer holds the old inode across the
+// switch.
+//
+// An exclusive lock on the active file serialises concurrent rotations, which
+// can overlap when the supervisor restarts.
 func rotateLog(path string, now time.Time) (string, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", false, err
 	}
-	active, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	// Lock a dedicated lock file, not the log itself: the log's inode is
+	// replaced by the rename below, and a lock belongs to the inode. Locking the
+	// log would let a waiter wake up holding the archived file and rotate an
+	// empty one under a second name.
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return "", false, err
 	}
-	defer active.Close()
+	defer lock.Close()
+	if err := lockFile(lock); err != nil {
+		return "", false, err
+	}
+	defer unlockFile(lock)
 
-	info, err := active.Stat()
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// Nothing to rotate; make sure the path exists for appenders.
+		fresh, createErr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+		if createErr != nil {
+			return "", false, createErr
+		}
+		return "", false, fresh.Close()
+	}
 	if err != nil {
 		return "", false, err
 	}
 	if info.Size() == 0 {
 		return "", false, nil
 	}
-	if _, err := active.Seek(0, io.SeekStart); err != nil {
-		return "", false, err
-	}
 	archive := nextLogArchivePath(path, now)
-	out, err := os.OpenFile(archive, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err := os.Rename(path, archive); err != nil {
+		return "", false, err
+	}
+	fresh, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
 	if err != nil {
+		// Put the archived file back rather than leave appenders without a path.
+		_ = os.Rename(archive, path)
 		return "", false, err
 	}
-	if _, err := io.Copy(out, active); err != nil {
-		_ = out.Close()
-		return "", false, err
-	}
-	if err := out.Close(); err != nil {
-		return "", false, err
-	}
-	if err := active.Truncate(0); err != nil {
-		return "", false, err
-	}
-	if _, err := active.Seek(0, io.SeekStart); err != nil {
+	if err := fresh.Close(); err != nil {
 		return "", false, err
 	}
 	return archive, true, nil
