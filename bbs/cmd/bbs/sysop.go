@@ -412,6 +412,7 @@ func (a *app) editBoardMessage(callsign, lang string) {
 		logDetail = fmt.Sprintf("board=%q subject=%q", data.Boards[idx].Name, subject)
 	}
 	if logAction != "" {
-		a.logBBSAction(callsign, logAction, logDetail)
+		// logDetail is data, not a format string.
+		a.logBBSAction(callsign, logAction, "%s", logDetail)
 	}
 }
