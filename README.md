@@ -2,7 +2,7 @@
 
 A small SSH BBS for amateur radio operators, shipped as a container image. It listens on SSH port `2222` and, when the WireGuard profile is installed, is reachable through HamNet on the WireGuard interface as well.
 
-The `compose.yaml` in this repository is the standalone/local way to run it. The production instance runs on k3s and is delivered by Fleet from a GitOps repository — see [Deployment](#deployment).
+Production runs as a k3s Deployment delivered by Fleet from a GitOps repository — see [Deployment](#deployment). The compose files here are a **local development convenience** for running the stack on a workstation; they are not part of the deployed system and are not a supported production path.
 
 The first version is intentionally no-frills: a Charm Bubble Tea/Lip Gloss terminal UI, forms, cursor-key menus, paginated lists, local message boards, station directory, bulletins, and APRS-IS message sending/receiving. Screens target a 132×24 terminal; on each screen the BBS sends a best-effort xterm resize request to the client and keeps Bubble Tea's logical renderer at the same size. If the SSH client blocks remote window resizing, enable its window-operation permission or set the client window to 132×24 manually; SSH has no protocol-level server request for changing the local emulator window.
 
@@ -12,7 +12,7 @@ This project uses OpenSSH as the transport and a small Go BBS application as the
 
 ## Files
 
-- `compose.yaml` runs WireGuard and the BBS containers for a standalone install.
+- `compose.yaml`, `compose.dockge.yaml` — local development convenience only; see [Local development](#local-development). Not used by the deployment.
 - `bbs/` contains the SSH server image and BBS application.
 - `bbs/cmd/bbs/` contains the Go BBS application.
 - `bbs/go.mod` declares the Charm terminal UI dependencies.
@@ -22,7 +22,13 @@ This project uses OpenSSH as the transport and a small Go BBS application as the
 - `bbs-data` is the Docker named volume that stores the SQLite database and logs.
 - `ssh/authorized_keys` is optional and ignored by git.
 
-## Quick Start
+## Local development
+
+The steps below run the stack with Docker Compose on a workstation, to try the
+BBS or work on it. They are a convenience, not the deployment path: the compose
+files reference floating `:latest` tags and are not kept in step with what the
+cluster runs. For anything beyond local use, deploy the image through the GitOps
+repository described in [Deployment](#deployment).
 
 1. Copy the environment file:
 
@@ -53,12 +59,16 @@ This project uses OpenSSH as the transport and a small Go BBS application as the
    ssh -p 2222 bbs@localhost
    ```
 
-From HamNet, connect to the assigned WireGuard address on SSH port `2222`:
+With the WireGuard profile installed, the same port is reachable from HamNet on
+the assigned address:
 
 ```sh
 ssh -p 2222 bbs@44.27.132.79
 ssh -p 2222 bbs@<docker-host-address>
 ```
+
+That applies to whichever way the stack is running — a local compose run with
+the WireGuard container, or the Fleet deployment.
 
 ## SSH Access
 
@@ -190,7 +200,8 @@ The container also starts an APRS supervisor helper:
 /usr/local/bin/bbs_app aprs-supervisor
 ```
 
-The supervisor tails APRS logs into `docker-compose logs bbs`, rotates those
+The supervisor tails APRS logs into the container's own stdout (so they appear
+in `kubectl logs`, or `docker compose logs` for a local run), rotates those
 logs nightly at 03:00 UTC, keeps rotated logs for seven days, and watches the
 APRS receiver process. The receiver connects to APRS-IS with `filter t/m`,
 listens for APRS message packets, and stores messages addressed to BBS users
@@ -280,3 +291,8 @@ gh workflow run docker-image.yml --ref main -f version=v1.20
 `/opt/stacks/ham-bbs` on the host is legacy: it still holds the data and SSH
 bind paths that the Deployments mount, but its `compose.yaml` is not used and
 must not be treated as the deployment definition.
+
+For the same reason, `compose.yaml` and `compose.dockge.yaml` in this repository
+do not describe production. They are workstation conveniences (see
+[Local development](#local-development)); they use floating `:latest` tags and
+are not kept in step with the cluster.

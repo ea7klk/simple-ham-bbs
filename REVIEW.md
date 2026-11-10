@@ -355,15 +355,16 @@ finding is kept for the record because the mechanism still exists for a
 deployment that does *not* enable guest mode.
 
 **Files:** `.env.example:5`, `bbs/docker-entrypoint.sh:4`,
-`compose.yaml:32`, `compose.dockge.yaml:39`, `bbs/sshd_config:10-11`
+`compose.yaml:40`, `compose.dockge.yaml:47`, `bbs/sshd_config:10-11`
 
 **Reachable path (as written):** `docker compose up -d` without editing `.env`
 (or after copying it and leaving the placeholder) sets the transport user's
-password to `change-this-password`. The WireGuard container publishes
-`2222:2222/tcp` on `0.0.0.0` (`compose.yaml:13`), and `sshd_config` allows
-password auth with `AllowUsers bbs`. `PermitEmptyPasswords yes` is also
-unconditionally on, which is only needed when `BBS_GUEST_MODE=true` deletes the
-password (`docker-entrypoint.sh:20-26`).
+password to `change-this-password`. That path is the local compose run; the
+deployed instance is the Fleet Deployment described in M4. The WireGuard
+container publishes `2222:2222/tcp` on `0.0.0.0` (`compose.yaml:21`), and
+`sshd_config` allows password auth with `AllowUsers bbs`. `PermitEmptyPasswords
+yes` is also unconditionally on, which is only needed when `BBS_GUEST_MODE=true`
+deletes the password (`docker-entrypoint.sh:20-26`).
 
 **Why this is safe as intended.** The deployment runs in guest mode, and in
 guest mode the transport password is deleted rather than set — so the
@@ -400,7 +401,7 @@ original finding described is still real for a deployment that turns guest mode
 off and leaves the placeholder in place: it would then set a reachable account's
 password to a value published in this repository. The defaults remain as they
 are by choice — an operator who sets `BBS_GUEST_MODE=false` is expected to set
-`BBS_USER_PASSWORD` at the same time, and `README.md` says so in the Quick Start
+`BBS_USER_PASSWORD` at the same time, and `README.md` says so in Local development
 step 2. If that assumption is ever judged too weak, the cheap hardening is to
 refuse to start when guest mode is off and the password is unset or equals the
 placeholder, and to scope `PermitEmptyPasswords yes` to a guest-mode `Match`
@@ -519,13 +520,14 @@ superseded work, `timeout-minutes` bounds every job, and the duplicate
 `actions/dependency-review-action` or a scheduled SHA updater is still the right
 way to keep the pinned SHAs current. Neither was added here.
 
-### M4. Broad capabilities on the WireGuard container — ACCEPTED (required); image pinning still open
+### M4. Broad capabilities and floating tags in the compose files — ACCEPTED
 
-**Files:** `compose.yaml:3,5-7,16,27-28`, `compose.dockge.yaml:3,5-7,21-22,30-31,34-35`
+**Files:** `compose.yaml:11,13-15,24,35-36`, `compose.dockge.yaml:11,13-15,29-30,38-39,42-43`
 
-**Status (annotated 2026-11-10):** the capabilities are accepted as necessary
-for WireGuard to function. They were verified against the running workload, not
-assumed. Unpinned image references remain open for the standalone compose files.
+**Status (annotated 2026-11-10):** accepted in full. The capabilities are
+necessary for WireGuard to function and were verified against the running
+workload, not assumed; the floating tags live only in compose files that the
+deployment does not use.
 
 **What was found.** `lscr.io/linuxserver/wireguard:latest` runs with `NET_ADMIN`,
 `SYS_MODULE`, and `/lib/modules` mounted read-only, and the BBS container shares
@@ -568,15 +570,25 @@ guarantees that preload (for example via a node-level `modules-load.d` entry),
 are a different case — they mount `/lib/modules`, so there the capability is
 functional and should stay.
 
-**Still open: pinning in the standalone compose path.** `compose.yaml` and
-`compose.dockge.yaml` still reference `lscr.io/linuxserver/wireguard:latest` and
-`ghcr.io/ea7klk/simple-ham-bbs:latest` (the latter with `pull_policy: always`),
-so a standalone install would take whatever the registry served at pull time.
-Production is unaffected: the BBS runs from a digest pinned in
-`spainip/infra`, and the cluster's WireGuard is digest-pinned as shown above.
-The remaining work is to pin both compose files by digest, or to state in
-`README.md` that they are development conveniences rather than a recommended
-production path.
+**Floating tags in the compose files: accepted (2026-11-10).** `compose.yaml`
+and `compose.dockge.yaml` reference `lscr.io/linuxserver/wireguard:latest` and
+`ghcr.io/ea7klk/simple-ham-bbs:latest` (the latter with `pull_policy: always`).
+That is accepted because **these files are not part of the deployed system**:
+production is a Fleet-managed k3s Deployment whose image is digest-pinned in
+`spainip/infra`, and the cluster's WireGuard is digest-pinned as well
+(`ghcr.io/wg-easy/wg-easy@sha256:66352ccb…`, verified on the live pod). A
+floating tag in a compose file that nothing deploys cannot swap the binary
+running under those privileges.
+
+`README.md` now states this explicitly: the compose path is filed under
+[Local development](README.md#local-development) rather than presented as
+a way to run the service, and says in as many words that it is a workstation
+convenience whose tags are not kept in step with the cluster.
+
+**Consequence for anyone who does use them.** A local run tracks whatever the
+registry serves. That is the intended trade for a development convenience; if
+these files are ever promoted to a real deployment path, they must be pinned by
+digest first, and that decision belongs in the same change.
 
 ### M5. Reachable dependency advisory in `golang.org/x/text` — FIXED
 
@@ -881,8 +893,7 @@ claim is honest.
 6. ~~**M1, M2** — rate limits at the two places untrusted input arrives (BBS
    login, APRS inbound)~~ — **done** (see M1 and M2).
 7. ~~**M3** — CI runner and permission hardening~~ — **done** (see M3);
-   ~~**M4** — capabilities~~ — **accepted, required by WireGuard** (see M4);
-   pinning the standalone compose images is still open.
+   ~~**M4** — WireGuard capabilities and compose tags~~ — **accepted** (see M4).
 8. ~~**M6, M8**~~ — **done** (see their sections); **L1–L11** — hygiene.
 
 ## Limits

@@ -1,3 +1,11 @@
+# Local development convenience only.
+#
+# This file is NOT used by the deployment. Production is a Fleet-managed k3s
+# Deployment whose image is digest-pinned in spainip/infra. The tags below are
+# floating on purpose: a workstation run should track whatever the registry
+# serves. Do not promote this file to a deployment path without pinning by
+# digest first. See README.md "Local development" and "Deployment".
+
 services:
   hamnet:
     image: lscr.io/linuxserver/wireguard:latest
