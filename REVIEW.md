@@ -57,12 +57,10 @@ and `applyConfiguredSysops()` re-applies it on every login).
 **Why it matters:** callsigns are legal identities in amateur radio. Three
 distinct impacts follow from one root cause:
 
-1. **Privilege escalation.** `BBS_SYSOPS=EA1ABC` only grants sysop to the first
-   person who registers `EA1ABC`. If that is not the operator — and nothing
-   prevents it — the attacker gets the sysop menu: user deletion, board
-   deletion, message editing, bulletin publishing. `README.md` documents this
-   bootstrap path without warning that it must be claimed before the port is
-   exposed.
+1. **Privilege escalation.** `BBS_SYSOPS=EA1ABC` granted sysop to whoever
+   registered `EA1ABC`, and kept granting it on every later login. If that was
+   not the operator — and nothing prevented it — the attacker got the sysop
+   menu: user deletion, board deletion, message editing, bulletin publishing.
 2. **Transmission as another station.** `sendAPRSMessage` derives the APRS-IS
    passcode from the logged-in callsign (`aprsPasscode(from)`, `aprs.go:620`)
    and transmits under it. APRS passcodes are a public function of the
