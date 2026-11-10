@@ -519,22 +519,64 @@ superseded work, `timeout-minutes` bounds every job, and the duplicate
 `actions/dependency-review-action` or a scheduled SHA updater is still the right
 way to keep the pinned SHAs current. Neither was added here.
 
-### M4. Unpinned `:latest` images with broad capabilities
+### M4. Broad capabilities on the WireGuard container — ACCEPTED (required); image pinning still open
 
-**Files:** `compose.yaml:3,5-7,16`, `compose.dockge.yaml:30-31`
+**Files:** `compose.yaml:3,5-7,16,27-28`, `compose.dockge.yaml:3,5-7,21-22,30-31,34-35`
 
-`lscr.io/linuxserver/wireguard:latest` runs with `NET_ADMIN` and `SYS_MODULE`
-and has `/lib/modules` mounted read-only. `SYS_MODULE` plus a module tree lets
-the container load kernel modules; combined with a floating tag, an upstream
-compromise or regression lands directly in the network namespace that carries
-all BBS traffic. `compose.dockge.yaml` pins the BBS to `:latest` with
-`pull_policy: always`, so a failed build pushes straight to production on the
-next restart.
+**Status (annotated 2026-11-10):** the capabilities are accepted as necessary
+for WireGuard to function. They were verified against the running workload, not
+assumed. Unpinned image references remain open for the standalone compose files.
 
-**Fix:** pin by digest or immutable version tag, drop `SYS_MODULE` unless
-something demonstrably needs it (LinuxServer's image uses it for `iptables`
-modules in some paths — verify, do not assume), and promote images by digest
-rather than by `latest`.
+**What was found.** `lscr.io/linuxserver/wireguard:latest` runs with `NET_ADMIN`,
+`SYS_MODULE`, and `/lib/modules` mounted read-only, and the BBS container shares
+its network namespace. A floating tag plus module-loading capability means an
+upstream compromise or regression would land directly in the namespace that
+carries all BBS traffic.
+
+**Why the capabilities are required.** The cluster runs a real WireGuard
+endpoint (`wg-easy`, namespace `wireguard`), so this is not a theoretical grant:
+
+- `NET_ADMIN` is what creates and configures the tunnel. Verified on the live
+  workload: a `wg0` interface with an active peer and a completed handshake, in
+  the **host** network namespace (`hostNetwork: true`). Creating the interface,
+  assigning addresses, adding routes and installing NAT rules all require it.
+  There is no way to run a kernel WireGuard endpoint without `NET_ADMIN`; a
+  userspace implementation would still need `/dev/net/tun` and equivalent
+  privilege. Accepting it is the price of the product.
+- `SYS_MODULE` exists because WireGuard on Linux is a **loadable module**, not
+  built in: the node's kernel config says `CONFIG_WIREGUARD=m`, and the module is
+  present in `lsmod` with a populated `/sys/module/wireguard`. Loading it needs
+  `SYS_MODULE` *and* a readable module tree, which is exactly why the LinuxServer
+  image ships the `/lib/modules` bind mount. On a host that has not preloaded the
+  module, dropping `SYS_MODULE` would leave the container unable to bring the
+  tunnel up.
+
+**Honest scope of the grant.** With `hostNetwork: true`, `NET_ADMIN` is not
+namespace-local advice — it is host-level network control: interfaces, routes,
+and firewall rules on the node itself. That is inherent to a VPN endpoint and is
+accepted here, with two mitigations that do not depend on the capabilities:
+the live WireGuard image is **digest-pinned**
+(`ghcr.io/wg-easy/wg-easy@sha256:66352ccb…`), so a moving tag cannot swap the
+binary under those privileges, and the container carries no other capabilities.
+
+`SYS_MODULE` is also **inert in the Kubernetes path**: the live `wg-easy` pod
+mounts only a config volume and `/dev/shm`, not `/lib/modules`, so it cannot load
+modules from inside the container even with the capability. It survives only
+because the node's kernel already has `wireguard` loaded. If the deployment ever
+guarantees that preload (for example via a node-level `modules-load.d` entry),
+`SYS_MODULE` can be dropped there without changing behaviour. The compose files
+are a different case — they mount `/lib/modules`, so there the capability is
+functional and should stay.
+
+**Still open: pinning in the standalone compose path.** `compose.yaml` and
+`compose.dockge.yaml` still reference `lscr.io/linuxserver/wireguard:latest` and
+`ghcr.io/ea7klk/simple-ham-bbs:latest` (the latter with `pull_policy: always`),
+so a standalone install would take whatever the registry served at pull time.
+Production is unaffected: the BBS runs from a digest pinned in
+`spainip/infra`, and the cluster's WireGuard is digest-pinned as shown above.
+The remaining work is to pin both compose files by digest, or to state in
+`README.md` that they are development conveniences rather than a recommended
+production path.
 
 ### M5. Reachable dependency advisory in `golang.org/x/text` — FIXED
 
@@ -839,7 +881,8 @@ claim is honest.
 6. ~~**M1, M2** — rate limits at the two places untrusted input arrives (BBS
    login, APRS inbound)~~ — **done** (see M1 and M2).
 7. ~~**M3** — CI runner and permission hardening~~ — **done** (see M3);
-   **M4** — image pinning is still open.
+   ~~**M4** — capabilities~~ — **accepted, required by WireGuard** (see M4);
+   pinning the standalone compose images is still open.
 8. ~~**M6, M8**~~ — **done** (see their sections); **L1–L11** — hygiene.
 
 ## Limits
