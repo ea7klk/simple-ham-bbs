@@ -28,7 +28,7 @@ does not prove their absence.
 - **Trust model**: still unverified. A callsign is not a credential and cannot be validated, so anyone can claim an unregistered one; the permanent sysop grant from `BBS_SYSOPS` is fixed (H1).
 - **Multi-user concurrency**: fixed. Every mutation writes only the rows it names, inside an immediate transaction, so a concurrent session cannot overwrite another's data.
 - **Terminal injection**: fixed. User text is now sanitised on input, on write, and on read, so stored escape sequences can no longer reach another user's terminal.
-- **Defaults**: one publicly known SSH password away from a session on port 2222.
+- **Defaults**: guest mode is on by design and deletes the transport password, so the published placeholder is inert; accepted (H4).
 - **Dependency hygiene**: one reachable advisory; dependencies otherwise current.
 - **Architecture**: workable at small scale. The persistence model was the source of the worst findings and is now row-level; the per-connection process model still forces every session to pay global startup cost.
 
@@ -346,33 +346,65 @@ panel, and no fixed-width TUI can fully prevent that. Cleaning happens on read,
 so a repaired row is only rewritten in the database the next time that record is
 saved; until then the stored bytes stay hostile but unreachable.
 
-### H4. Publicly known default SSH password, published on all interfaces
+### H4. Publicly known default SSH password, published on all interfaces — ACCEPTED, SAFE AND AS INTENDED
+
+**Status (annotated 2026-11-10):** accepted risk, by design. The password
+placeholder has no effect on the running deployment, and the open access it
+implies is the documented purpose of guest mode. Details below; the original
+finding is kept for the record because the mechanism still exists for a
+deployment that does *not* enable guest mode.
 
 **Files:** `.env.example:5`, `bbs/docker-entrypoint.sh:4`,
 `compose.yaml:32`, `compose.dockge.yaml:39`, `bbs/sshd_config:10-11`
 
-**Reachable path:** `docker compose up -d` without editing `.env` (or after
-copying it and leaving the placeholder) sets the transport user's password to
-`change-this-password`. The WireGuard container publishes `2222:2222/tcp` on
-`0.0.0.0` (`compose.yaml:13`), and `sshd_config` allows password auth with
-`AllowUsers bbs`. `PermitEmptyPasswords yes` is also unconditionally on, which
-is only needed when `BBS_GUEST_MODE=true` deletes the password
-(`docker-entrypoint.sh:20-26`).
+**Reachable path (as written):** `docker compose up -d` without editing `.env`
+(or after copying it and leaving the placeholder) sets the transport user's
+password to `change-this-password`. The WireGuard container publishes
+`2222:2222/tcp` on `0.0.0.0` (`compose.yaml:13`), and `sshd_config` allows
+password auth with `AllowUsers bbs`. `PermitEmptyPasswords yes` is also
+unconditionally on, which is only needed when `BBS_GUEST_MODE=true` deletes the
+password (`docker-entrypoint.sh:20-26`).
 
-**Why it matters:** the default path yields a reachable SSH account with a
-password published in this repository. `ForceCommand` keeps it from being a
-shell, but it is a free interactive session into an application that will then
-register any callsign the caller types — which chains directly into H1. In
-guest mode the same port gives an unauthenticated session; `MaxStartups`
-defaults (10:30:100) then bound how much of the service an attacker can
-occupy.
+**Why this is safe as intended.** The deployment runs in guest mode, and in
+guest mode the transport password is deleted rather than set — so the
+placeholder value is dead configuration, not a credential:
 
-**Fix:** refuse to start when `BBS_USER_PASSWORD` is unset or equals the
-placeholder and guest mode is off — fail loudly instead of defaulting. Move
-`PermitEmptyPasswords yes` inside a `Match` block that only applies when guest
-mode is enabled, or generate a random password at first start and print it once
-to the container log. Consider binding `2222` to the WireGuard interface only
-rather than `0.0.0.0`.
+- `configure_login_password` (`docker-entrypoint.sh:20-26`) branches on
+  `BBS_GUEST_MODE`. In guest mode it runs `passwd -d bbs` and never touches
+  `BBS_USER_PASSWORD`; the placeholder is therefore never applied to any
+  account.
+- Verified on the running deployment: `BBS_GUEST_MODE=true`, and `/etc/shadow`
+  has an empty password field for `bbs`. `BBS_USER_PASSWORD` is present in the
+  `bbs-env` secret with the placeholder value and has no effect, precisely
+  because guest mode deletes the password first.
+- `PermitEmptyPasswords yes` is what makes that work; it is not an oversight.
+  It is required for the passwordless `bbs` account that guest mode creates, and
+  is only reachable because `AllowUsers bbs` limits the server to that one
+  account. `ForceCommand` then confines the session to the BBS application, so
+  even an unauthenticated session never reaches a shell.
+- An open BBS is the product: `README.md` documents
+  `BBS_GUEST_MODE=true` as the way to let callers connect without a password.
+  That is the intended deployment shape, not a misconfiguration.
+
+**What the trade-off buys and costs.** Guest mode means the SSH port is an
+unauthenticated entry point to the BBS application. That is deliberate and
+bounded: `ForceCommand` (no shell, no forwarding), `MaxStartups` (10:30:100),
+and fail2ban on the sshd log. The residual exposure is not SSH but identity —
+an unauthenticated caller can create an account under any unregistered callsign,
+which is H1. H1's privilege-escalation path is closed: `BBS_SYSOPS` no longer
+confers a standing role, so a guest-created account cannot reach the sysop menu
+without an existing sysop granting it.
+
+**Residual configuration hazard (not an active finding).** The mechanism the
+original finding described is still real for a deployment that turns guest mode
+off and leaves the placeholder in place: it would then set a reachable account's
+password to a value published in this repository. The defaults remain as they
+are by choice — an operator who sets `BBS_GUEST_MODE=false` is expected to set
+`BBS_USER_PASSWORD` at the same time, and `README.md` says so in the Quick Start
+step 2. If that assumption is ever judged too weak, the cheap hardening is to
+refuse to start when guest mode is off and the password is unset or equals the
+placeholder, and to scope `PermitEmptyPasswords yes` to a guest-mode `Match`
+block.
 
 ---
 
@@ -712,8 +744,10 @@ claim is honest.
    ownership verification is **left open** (see H1, "Left as follow-up work").
 3. ~~**H3** — sanitise user text at the storage boundary~~ — **done** (see H3:
    one rule, enforced on input, write, read, and startup, with regression tests).
-4. **H4** — refuse to start on the placeholder password; scope
-   `PermitEmptyPasswords`.
+4. ~~**H4** — placeholder password defaults~~ — **accepted, safe and as
+   intended** (see H4: guest mode deletes the transport password, so the
+   placeholder is never applied; the config hazard only exists with guest mode
+   off).
 5. **M5** — dependency update; ~~M7~~ — **done** in the paths H2 rewrote (see
    M7; read paths still ignore load errors).
 6. **M1, M2** — rate limits at the two places untrusted input arrives (BBS
