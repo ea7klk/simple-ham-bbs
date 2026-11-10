@@ -194,7 +194,7 @@ func TestReadAPRSISLoginResponseAndPipeWrite(t *testing.T) {
 
 func TestAPRSReceiverRecipientAndCleanupHelpers(t *testing.T) {
 	a := testApp(t)
-	if err := a.saveUsers(map[string]userProfile{
+	if err := a.replaceAllUsers(map[string]userProfile{
 		"EA7KLK": {EnableAPRS: true},
 		"EA1OFF": {EnableAPRS: false},
 		"EA2DIS": {EnableAPRS: true, Disabled: true},

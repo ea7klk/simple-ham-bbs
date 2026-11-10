@@ -145,8 +145,10 @@ func (a *app) editUserDetail(current, lang string, users map[string]userProfile,
 		a.showInfo(lang, a.t(lang, "cannot_remove_last_sysop"), [][]string{{target}})
 		return
 	}
-	users[target] = updated
-	_ = a.saveUsers(users)
+	if err := a.saveUser(target, updated); err != nil {
+		a.showMutationError(lang, a.t(lang, "user_detail_title"), err)
+		return
+	}
 	a.logBBSAction(current, "user_update", "target=%q disabled=%t", target, updated.Disabled)
 	a.showInfo(lang, a.t(lang, "user_updated"), userDetailRows(a, lang, target, updated, a.isSysop(target, updated)))
 }
@@ -198,30 +200,34 @@ func (a *app) confirmAndDeleteUser(current, lang string, users map[string]userPr
 	if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_user"), target)) {
 		return
 	}
-	delete(users, target)
-	_ = a.deleteUserAPRSHistory(target)
-	_ = a.saveUsers(users)
+	if err := a.deleteUser(target); err != nil {
+		a.showMutationError(lang, a.t(lang, "user_detail_title"), err)
+		return
+	}
 	a.logBBSAction(current, "user_delete", "target=%q", target)
 	a.showInfo(lang, a.t(lang, "user_deleted"), [][]string{{target}})
 }
 
 func (a *app) deleteUserAPRSHistory(callsign string) error {
-	key := normalizeCallsign(callsign)
 	return a.db.Transaction(func(tx *gorm.DB) error {
-		var sentRows []dbAPRSSent
-		if err := tx.Where("user_callsign = ?", key).Find(&sentRows).Error; err != nil {
-			return err
-		}
-		for _, row := range sentRows {
-			if err := tx.Delete(&dbAPRSSentPart{}, "sent_id = ?", row.ID).Error; err != nil {
-				return err
-			}
-		}
-		if err := tx.Delete(&dbAPRSSent{}, "user_callsign = ?", key).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&dbAPRSReceived{}, "user_callsign = ?", key).Error
+		return deleteAPRSHistoryRow(tx, normalizeCallsign(callsign))
 	})
+}
+
+func deleteAPRSHistoryRow(tx *gorm.DB, key string) error {
+	var sentRows []dbAPRSSent
+	if err := tx.Where("user_callsign = ?", key).Find(&sentRows).Error; err != nil {
+		return err
+	}
+	for _, row := range sentRows {
+		if err := tx.Delete(&dbAPRSSentPart{}, "sent_id = ?", row.ID).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Delete(&dbAPRSSent{}, "user_callsign = ?", key).Error; err != nil {
+		return err
+	}
+	return tx.Delete(&dbAPRSReceived{}, "user_callsign = ?", key).Error
 }
 
 func (a *app) wouldRemoveLastSysopWithProfile(users map[string]userProfile, callsign string, profile userProfile) bool {
@@ -262,8 +268,10 @@ func (a *app) toggleSysop(current, lang string, users map[string]userProfile) {
 	if p.IsSysop {
 		p.Disabled = false
 	}
-	users[target] = p
-	_ = a.saveUsers(users)
+	if err := a.saveUser(target, p); err != nil {
+		a.showMutationError(lang, a.t(lang, "sysop_toggle_sysop"), err)
+		return
+	}
 	a.logBBSAction(current, "sysop_toggle", "target=%q enabled=%t", target, p.IsSysop)
 }
 
@@ -273,16 +281,24 @@ func (a *app) addBoard(callsign, lang string) {
 	if !ok {
 		return
 	}
-	id := boardID(values["name"])
+	name := sanitizeSingleLineText(values["name"])
+	description := sanitizeSingleLineText(values["description"])
+	if name == "" {
+		a.showInfo(lang, a.t(lang, "board_form_title"), [][]string{{errorStyle.Render(a.t(lang, "required"))}})
+		return
+	}
+	id := boardID(name)
 	for _, b := range data.Boards {
 		if b.ID == id {
-			a.showInfo(lang, a.t(lang, "board_exists"), [][]string{{values["name"]}})
+			a.showInfo(lang, a.t(lang, "board_exists"), [][]string{{name}})
 			return
 		}
 	}
-	data.Boards = append(data.Boards, board{ID: id, Name: values["name"], Description: values["description"], Created: now()})
-	_ = a.saveBoards(data)
-	a.logBBSAction(callsign, "board_create", "board=%q", values["name"])
+	if err := a.createBoard(board{ID: id, Name: name, Description: description, Created: now()}); err != nil {
+		a.showMutationError(lang, a.t(lang, "board_form_title"), err)
+		return
+	}
+	a.logBBSAction(callsign, "board_create", "board=%q", name)
 }
 
 func (a *app) deleteBoard(callsign, lang string) {
@@ -299,8 +315,10 @@ func (a *app) deleteBoard(callsign, lang string) {
 		return
 	}
 	name := data.Boards[idx].Name
-	data.Boards = append(data.Boards[:idx], data.Boards[idx+1:]...)
-	_ = a.saveBoards(data)
+	if err := a.deleteBoardRow(data.Boards[idx].ID); err != nil {
+		a.showMutationError(lang, a.t(lang, "sysop_delete_board"), err)
+		return
+	}
 	a.logBBSAction(callsign, "board_delete", "board=%q", name)
 }
 
@@ -314,17 +332,25 @@ func (a *app) renameBoard(callsign, lang string) {
 	if !ok {
 		return
 	}
-	id := boardID(values["name"])
+	name := sanitizeSingleLineText(values["name"])
+	if name == "" {
+		a.showInfo(lang, a.t(lang, "board_rename_title"), [][]string{{errorStyle.Render(a.t(lang, "required"))}})
+		return
+	}
+	id := boardID(name)
 	for i, b := range data.Boards {
 		if i != idx && b.ID == id {
-			a.showInfo(lang, a.t(lang, "board_exists"), [][]string{{values["name"]}})
+			a.showInfo(lang, a.t(lang, "board_exists"), [][]string{{name}})
 			return
 		}
 	}
 	oldName := data.Boards[idx].Name
-	data.Boards[idx].Name, data.Boards[idx].ID = values["name"], id
-	_ = a.saveBoards(data)
-	a.logBBSAction(callsign, "board_rename", "from=%q to=%q", oldName, values["name"])
+	oldID := data.Boards[idx].ID
+	if err := a.renameBoardRow(oldID, id, name); err != nil {
+		a.showMutationError(lang, a.t(lang, "board_rename_title"), err)
+		return
+	}
+	a.logBBSAction(callsign, "board_rename", "from=%q to=%q", oldName, name)
 }
 
 func (a *app) editBoardMessage(callsign, lang string) {
@@ -366,17 +392,26 @@ func (a *app) editBoardMessage(callsign, lang string) {
 		if !a.confirmDelete(lang, fmt.Sprintf(a.t(lang, "confirm_delete_message"), msg.Subject)) {
 			return
 		}
-		if messages, deleted := deleteMessageAtPath(data.Boards[idx].Messages, path); deleted {
-			data.Boards[idx].Messages = messages
-			logAction = "message_delete"
-			logDetail = fmt.Sprintf("board=%q subject=%q", data.Boards[idx].Name, msg.Subject)
+		if err := a.deleteMessageSubtree(data.Boards[idx].ID, msg.ID); err != nil {
+			a.showMutationError(lang, a.t(lang, "message_edit_title"), err)
+			return
 		}
-	} else {
-		msg.Subject, msg.Body, msg.Edited = values["subject"], values["body"], now()
-		logAction = "message_edit"
+		logAction = "message_delete"
 		logDetail = fmt.Sprintf("board=%q subject=%q", data.Boards[idx].Name, msg.Subject)
+	} else {
+		subject := sanitizeSingleLineText(values["subject"])
+		body := sanitizeMultilineText(values["body"])
+		if subject == "" || body == "" {
+			a.showInfo(lang, a.t(lang, "message_edit_title"), [][]string{{errorStyle.Render(a.t(lang, "required"))}})
+			return
+		}
+		if err := a.updateMessageRow(msg.ID, subject, body, now()); err != nil {
+			a.showMutationError(lang, a.t(lang, "message_edit_title"), err)
+			return
+		}
+		logAction = "message_edit"
+		logDetail = fmt.Sprintf("board=%q subject=%q", data.Boards[idx].Name, subject)
 	}
-	_ = a.saveBoards(data)
 	if logAction != "" {
 		a.logBBSAction(callsign, logAction, logDetail)
 	}

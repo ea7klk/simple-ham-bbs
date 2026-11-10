@@ -11,7 +11,7 @@ func TestBulletinPersistenceRoundTrip(t *testing.T) {
 		{Title: "Net", Body: "Weekly net", From: "EA7KLK"},
 		{Title: "Repeater", Body: "Maintenance", Updated: "2026-07-10 12:00 UTC", From: "SYSOP"},
 	}
-	if err := a.saveBulletins(items); err != nil {
+	if err := a.replaceAllBulletins(items); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := a.loadBulletins()
@@ -21,12 +21,12 @@ func TestBulletinPersistenceRoundTrip(t *testing.T) {
 	if len(loaded) != 2 || loaded[0].Title != "Net" || loaded[0].Updated == "" || loaded[1].Updated != items[1].Updated {
 		t.Fatalf("loadBulletins() = %#v", loaded)
 	}
-	if err := a.saveBulletins([]bulletin{{Title: "Only", Body: "One"}}); err != nil {
+	if err := a.replaceAllBulletins([]bulletin{{Title: "Only", Body: "One"}}); err != nil {
 		t.Fatal(err)
 	}
 	loaded, _ = a.loadBulletins()
 	if len(loaded) != 1 || loaded[0].Title != "Only" {
-		t.Fatalf("saveBulletins replacement = %#v", loaded)
+		t.Fatalf("replaceAllBulletins replacement = %#v", loaded)
 	}
 }
 
@@ -49,7 +49,7 @@ func TestBoardsPersistenceAndThreadHelpers(t *testing.T) {
 		},
 		{ID: "second", Name: "Second", Description: "Another"},
 	}}
-	if err := a.saveBoards(data); err != nil {
+	if err := a.replaceAllBoards(data); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := a.loadBoards()
@@ -59,7 +59,10 @@ func TestBoardsPersistenceAndThreadHelpers(t *testing.T) {
 	if len(loaded.Boards) != 2 {
 		t.Fatalf("loadBoards count = %d", len(loaded.Boards))
 	}
-	if loaded.Boards[0].ID != "aprs-traffic-board-with-a-very-long-name" || len(loaded.Boards[0].Description) != 120 {
+	// Descriptions are clipped to 120 bytes on save; loading sanitises text, which
+	// trims the trailing space the clip can leave behind.
+	if loaded.Boards[0].ID != "aprs-traffic-board-with-a-very-long-name" ||
+		len(loaded.Boards[0].Description) > 120 || len(loaded.Boards[0].Description) < 100 {
 		t.Fatalf("board clipping/id unexpected: %#v", loaded.Boards[0])
 	}
 	if got := totalMessages(loaded.Boards[0].Messages); got != 2 {
@@ -78,22 +81,47 @@ func TestBoardsPersistenceAndThreadHelpers(t *testing.T) {
 	if msg := messageAtPath(loaded.Boards[0].Messages, []int{9}); msg != nil {
 		t.Fatalf("messageAtPath invalid = %#v", msg)
 	}
-	if !appendReplyAtPath(loaded.Boards[0].Messages, []int{0, 0}, message{From: "EA2XYZ", Subject: "Grandchild"}) {
-		t.Fatal("appendReplyAtPath failed")
+	// Thread mutations now go through row-level writes; the in-memory tree is a
+	// read-only view. Exercise the same operations against the database.
+	parentID := loaded.Boards[0].Messages[0].Replies[0].ID
+	if parentID == 0 {
+		t.Fatalf("loaded reply has no row id: %#v", loaded.Boards[0].Messages[0].Replies[0])
 	}
-	if got := totalMessages(loaded.Boards[0].Messages); got != 3 {
-		t.Fatalf("total after append = %d, want 3", got)
+	if _, err := a.createMessage(loaded.Boards[0].ID, &parentID, message{From: "EA2XYZ", Subject: "Grandchild"}); err != nil {
+		t.Fatal(err)
 	}
-	afterDelete, ok := deleteMessageAtPath(loaded.Boards[0].Messages, []int{0, 0, 0})
-	if !ok || totalMessages(afterDelete) != 2 {
-		t.Fatalf("delete grandchild ok=%v messages=%#v", ok, afterDelete)
+	reloaded, err := a.loadBoards()
+	if err != nil {
+		t.Fatal(err)
 	}
-	afterDelete, ok = deleteMessageAtPath(afterDelete, []int{0})
-	if !ok || len(afterDelete) != 0 {
-		t.Fatalf("delete root ok=%v messages=%#v", ok, afterDelete)
+	if got := totalMessages(reloaded.Boards[0].Messages); got != 3 {
+		t.Fatalf("total after reply = %d, want 3", got)
 	}
-	if _, ok := deleteMessageAtPath(afterDelete, []int{0}); ok {
-		t.Fatal("deleteMessageAtPath succeeded on missing item")
+
+	if err := a.deleteMessageSubtree(reloaded.Boards[0].ID, parentID); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err = a.loadBoards()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := totalMessages(reloaded.Boards[0].Messages); got != 1 {
+		t.Fatalf("total after subtree delete = %d, want 1", got)
+	}
+
+	rootID := reloaded.Boards[0].Messages[0].ID
+	if err := a.deleteMessageSubtree(reloaded.Boards[0].ID, rootID); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err = a.loadBoards()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := totalMessages(reloaded.Boards[0].Messages); got != 0 {
+		t.Fatalf("total after root delete = %d, want 0", got)
+	}
+	if err := a.deleteMessageSubtree(reloaded.Boards[0].ID, rootID); err != nil {
+		t.Fatalf("deleting a missing message returned an error: %v", err)
 	}
 }
 

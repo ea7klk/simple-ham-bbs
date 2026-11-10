@@ -72,7 +72,7 @@ func TestStorageUsersPasswordsAndJSON(t *testing.T) {
 		"ea7klk": {FullName: "Volker", Email: "v@example.com", Language: "de", EnableAPRS: true, IsSysop: true, LastSeen: "2026-07-10 10:00 UTC"},
 		"empty":  {FullName: "skip"},
 	}
-	if err := a.saveUsers(users); err != nil {
+	if err := a.replaceAllUsers(users); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := a.loadUsers()
@@ -83,20 +83,20 @@ func TestStorageUsersPasswordsAndJSON(t *testing.T) {
 		t.Fatalf("loadUsers() = %#v", loaded)
 	}
 	delete(loaded, "EMPTY")
-	if err := a.saveUsers(loaded); err != nil {
+	if err := a.replaceAllUsers(loaded); err != nil {
 		t.Fatal(err)
 	}
 	loaded, _ = a.loadUsers()
 	if _, ok := loaded["EMPTY"]; ok {
-		t.Fatalf("saveUsers did not delete missing user: %#v", loaded)
+		t.Fatalf("replaceAllUsers did not replace the user table: %#v", loaded)
 	}
 
 	p := loaded["EA7KLK"]
 	p.IsSysop = false
 	loaded["EA7KLK"] = p
 	a.cfg.sysops = map[string]bool{"EA1ABC": true, "EA7KLK": true}
-	if !a.applyConfiguredSysops(loaded) {
-		t.Fatal("applyConfiguredSysops did not mark existing configured sysop")
+	if changed := a.applyConfiguredSysops(loaded); len(changed) != 1 || changed[0] != "EA7KLK" {
+		t.Fatalf("applyConfiguredSysops() = %v, want [EA7KLK]", changed)
 	}
 	if !a.isSysop("EA7KLK", loaded["EA7KLK"]) {
 		t.Fatal("configured/profile sysop not detected")

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"gorm.io/gorm"
 	"strconv"
 	"strings"
 )
@@ -16,8 +15,8 @@ func (a *app) loadBoards() (boardsData, error) {
 	for _, row := range boardRows {
 		data.Boards = append(data.Boards, board{
 			ID:          row.ID,
-			Name:        row.Name,
-			Description: row.Description,
+			Name:        sanitizeSingleLineText(row.Name),
+			Description: sanitizeSingleLineText(row.Description),
 			Created:     row.Created,
 			Messages:    a.loadBoardMessages(row.ID),
 		})
@@ -32,31 +31,8 @@ func defaultBoard(messages []message) board {
 	return board{ID: defaultBoardID, Name: "General", Description: "General local messages", Created: now(), Messages: messages}
 }
 
-func (a *app) saveBoards(data boardsData) error {
-	return a.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("DELETE FROM db_messages").Error; err != nil {
-			return err
-		}
-		if err := tx.Exec("DELETE FROM db_boards").Error; err != nil {
-			return err
-		}
-		for i, b := range data.Boards {
-			id := boardID(firstNonEmpty(b.ID, b.Name).(string))
-			if id == "" {
-				id = defaultBoardID
-			}
-			row := dbBoard{ID: id, Position: i, Name: clip(firstNonEmpty(b.Name, id).(string), 60), Description: clip(b.Description, 120), Created: firstNonEmpty(b.Created, now()).(string)}
-			if err := tx.Create(&row).Error; err != nil {
-				return err
-			}
-			if err := saveMessageRows(tx, id, nil, b.Messages); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
+// loadBoardMessages builds the read-only thread view. Messages carry their row
+// IDs so callers can address a reply or an edit without re-reading the board.
 func (a *app) loadBoardMessages(boardID string) []message {
 	rows := []dbMessage{}
 	if err := a.db.Where("board_id = ?", boardID).Order("parent_id, position, id").Find(&rows).Error; err != nil {
@@ -75,34 +51,18 @@ func (a *app) loadBoardMessages(boardID string) []message {
 		out := []message{}
 		for _, row := range byParent[parent] {
 			out = append(out, message{
-				From:    row.From,
-				Subject: row.Subject,
-				Body:    row.Body,
+				ID:      row.ID,
+				From:    sanitizeSingleLineText(row.From),
+				Subject: sanitizeSingleLineText(row.Subject),
+				Body:    sanitizeMultilineText(row.Body),
 				Created: row.Created,
-				Edited:  row.Edited,
+				Edited:  sanitizeSingleLineText(row.Edited),
 				Replies: build(row.ID),
 			})
 		}
 		return out
 	}
 	return build(0)
-}
-
-func saveMessageRows(tx *gorm.DB, boardID string, parentID *uint, messages []message) error {
-	for i, msg := range messages {
-		row := dbMessage{BoardID: boardID, ParentID: parentID, Position: i, From: msg.From, Subject: msg.Subject, Body: msg.Body, Created: msg.Created, Edited: msg.Edited}
-		if row.Created == "" {
-			row.Created = now()
-		}
-		if err := tx.Create(&row).Error; err != nil {
-			return err
-		}
-		id := row.ID
-		if err := saveMessageRows(tx, boardID, &id, msg.Replies); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type threadedMessage struct {
@@ -161,10 +121,13 @@ func (a *app) postMessage(callsign, lang string) {
 	a.postMessageToBoard(callsign, lang, &data, boardIdx)
 }
 
+// postMessageToBoard appends one row. The board the user is looking at is
+// addressed by ID, so a concurrent edit to another board cannot touch it.
 func (a *app) postMessageToBoard(callsign, lang string, data *boardsData, boardIdx int) bool {
 	if data == nil || boardIdx < 0 || boardIdx >= len(data.Boards) {
 		return false
 	}
+	boardKey := data.Boards[boardIdx].ID
 	action, values, ok := a.runForm(lang, a.t(lang, "message_form_title")+" - "+data.Boards[boardIdx].Name, []formField{
 		{name: "subject", label: a.t(lang, "subject"), required: true, limit: 80},
 		{name: "body", label: a.t(lang, "message_body"), kind: fieldTextArea, required: true, limit: 4000},
@@ -172,13 +135,22 @@ func (a *app) postMessageToBoard(callsign, lang string, data *boardsData, boardI
 	if !ok || action == "cancel" {
 		return false
 	}
-	data.Boards[boardIdx].Messages = append(data.Boards[boardIdx].Messages, message{From: callsign, Subject: values["subject"], Body: values["body"], Created: now()})
-	if len(data.Boards[boardIdx].Messages) > 500 {
-		data.Boards[boardIdx].Messages = data.Boards[boardIdx].Messages[len(data.Boards[boardIdx].Messages)-500:]
+	subject := sanitizeSingleLineText(values["subject"])
+	body := sanitizeMultilineText(values["body"])
+	if subject == "" || body == "" {
+		a.showInfo(lang, a.t(lang, "message_form_title"), [][]string{{errorStyle.Render(a.t(lang, "required"))}})
+		return false
 	}
-	_ = a.saveBoards(*data)
-	a.logBBSAction(callsign, "message_post", "board=%q subject=%q", data.Boards[boardIdx].Name, values["subject"])
-	a.showInfo(lang, a.t(lang, "message_posted"), [][]string{{values["subject"]}})
+	if _, err := a.createMessage(boardKey, nil, message{From: callsign, Subject: subject, Body: body, Created: now()}); err != nil {
+		a.showMutationError(lang, a.t(lang, "message_form_title"), err)
+		return false
+	}
+	if err := a.trimBoardMessages(boardKey, 500); err != nil {
+		a.showMutationError(lang, a.t(lang, "message_form_title"), err)
+		return false
+	}
+	a.logBBSAction(callsign, "message_post", "board=%q subject=%q", data.Boards[boardIdx].Name, subject)
+	a.showInfo(lang, a.t(lang, "message_posted"), [][]string{{subject}})
 	return true
 }
 
@@ -198,7 +170,15 @@ func (a *app) readMessage(callsign, lang string, data *boardsData, boardIdx int,
 	}
 }
 
+// replyToMessage inserts one row under the parent's row ID. The parent is
+// resolved from the thread view the user chose, and the insert names it
+// directly, so a concurrent post to the same board cannot renumber it.
 func (a *app) replyToMessage(callsign, lang string, data *boardsData, boardIdx int, path []int, parent message) bool {
+	parentMsg := messageAtPath(data.Boards[boardIdx].Messages, path)
+	if parentMsg == nil || parentMsg.ID == 0 {
+		a.showInfo(lang, a.t(lang, "message_reply_title"), [][]string{{errorStyle.Render(a.t(lang, "required"))}})
+		return false
+	}
 	action, values, ok := a.runForm(lang, a.t(lang, "message_reply_title"), []formField{
 		{name: "subject", label: a.t(lang, "subject"), value: replySubject(parent.Subject), required: true, limit: 80},
 		{name: "body", label: a.t(lang, "message_body"), kind: fieldTextArea, required: true, limit: 4000},
@@ -206,13 +186,19 @@ func (a *app) replyToMessage(callsign, lang string, data *boardsData, boardIdx i
 	if !ok || action == "cancel" {
 		return false
 	}
-	reply := message{From: callsign, Subject: values["subject"], Body: values["body"], Created: now()}
-	if !appendReplyAtPath(data.Boards[boardIdx].Messages, path, reply) {
+	subject := sanitizeSingleLineText(values["subject"])
+	body := sanitizeMultilineText(values["body"])
+	if subject == "" || body == "" {
+		a.showInfo(lang, a.t(lang, "message_reply_title"), [][]string{{errorStyle.Render(a.t(lang, "required"))}})
 		return false
 	}
-	_ = a.saveBoards(*data)
-	a.logBBSAction(callsign, "message_reply", "board=%q subject=%q", data.Boards[boardIdx].Name, values["subject"])
-	a.showInfo(lang, a.t(lang, "message_reply_posted"), [][]string{{values["subject"]}})
+	parentID := parentMsg.ID
+	if _, err := a.createMessage(data.Boards[boardIdx].ID, &parentID, message{From: callsign, Subject: subject, Body: body, Created: now()}); err != nil {
+		a.showMutationError(lang, a.t(lang, "message_reply_title"), err)
+		return false
+	}
+	a.logBBSAction(callsign, "message_reply", "board=%q subject=%q", data.Boards[boardIdx].Name, subject)
+	a.showInfo(lang, a.t(lang, "message_reply_posted"), [][]string{{subject}})
 	return true
 }
 
@@ -268,34 +254,6 @@ func messageAtPath(messages []message, path []int) *message {
 		msg = &msg.Replies[idx]
 	}
 	return msg
-}
-
-func appendReplyAtPath(messages []message, path []int, reply message) bool {
-	msg := messageAtPath(messages, path)
-	if msg == nil {
-		return false
-	}
-	msg.Replies = append(msg.Replies, reply)
-	return true
-}
-
-func deleteMessageAtPath(messages []message, path []int) ([]message, bool) {
-	if len(path) == 0 {
-		return messages, false
-	}
-	idx := path[0]
-	if idx < 0 || idx >= len(messages) {
-		return messages, false
-	}
-	if len(path) == 1 {
-		return append(messages[:idx], messages[idx+1:]...), true
-	}
-	child, ok := deleteMessageAtPath(messages[idx].Replies, path[1:])
-	if !ok {
-		return messages, false
-	}
-	messages[idx].Replies = child
-	return messages, true
 }
 
 func totalMessages(messages []message) int {

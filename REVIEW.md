@@ -18,19 +18,24 @@ does not prove their absence.
   escape-sequence passthrough through `wrapText`/`panelStyle`, a two-process
   lost-update race on `saveBoards`, and a stale-snapshot race on `saveUsers`.
   All three reproduced the behaviour described below.
+- Fixed H3 and then H2 in this tree, each with regression tests. The probes that
+  proved the bugs were converted into permanent tests where they belonged (see
+  `sanitize_test.go` and `concurrency_test.go`); the H2 tests were also checked
+  to fail when the old write pattern is temporarily restored.
 
 ## Summary
 
 - **Trust model**: broken at the root. A callsign is an identity here, and the BBS lets anyone claim any callsign.
-- **Multi-user concurrency**: unsafe. Every mutation rewrites whole tables from a snapshot read earlier in a different process.
-- **Terminal injection**: real. User text reaches other users' terminals with ANSI escapes intact.
+- **Multi-user concurrency**: fixed. Every mutation writes only the rows it names, inside an immediate transaction, so a concurrent session cannot overwrite another's data.
+- **Terminal injection**: fixed. User text is now sanitised on input, on write, and on read, so stored escape sequences can no longer reach another user's terminal.
 - **Defaults**: one publicly known SSH password away from a session on port 2222.
 - **Dependency hygiene**: one reachable advisory; dependencies otherwise current.
-- **Architecture**: workable at small scale, but the persistence model and the per-connection process model are the source of most findings.
+- **Architecture**: workable at small scale. The persistence model was the source of the worst findings and is now row-level; the per-connection process model still forces every session to pay global startup cost.
 
 The two structural issues — H2 (whole-table rewrite from stale snapshots) and
-the per-connection process model — account for most of the exploitable impact.
-Fixing H2 and H1 changes the risk picture more than any of the smaller items.
+the per-connection process model — accounted for most of the exploitable impact.
+H2 and H3 are fixed in this tree; their sections record the mechanism and the
+evidence. H1 remains the most serious open finding.
 
 ---
 
@@ -76,7 +81,7 @@ first start) before it gets the role. Document the bootstrap race in
 `README.md` in the strongest terms and require an explicit
 `BBS_ALLOW_SELF_REGISTRATION=true` for the current behaviour.
 
-### H2. Every write rewrites the whole table from a stale snapshot; concurrent sessions destroy each other's data
+### H2. Every write rewrites the whole table from a stale snapshot; concurrent sessions destroy each other's data — FIXED
 
 **Files:** `bbs/cmd/bbs/boards.go:35-63`, `bbs/cmd/bbs/bulletins.go:19-37`,
 `bbs/cmd/bbs/storage.go:46-86`, `bbs/cmd/bbs/app.go:66-97`
@@ -102,23 +107,76 @@ login rewrites the entire user table**. Two simultaneous logins plus one
 registration can delete the registration; two simultaneous registrations can
 delete one another.
 
-**Why it matters:** silent data loss across users, including account deletion
+**Why it mattered:** silent data loss across users, including account deletion
 and lost sysop flags. `sqlDB.SetMaxOpenConns(1)` (`database.go:98`) only
 serialises within one process, so it does not help here. WAL plus
 `busy_timeout` prevents corruption but not lost updates. Every caller in
-`boards.go`, `bulletins.go`, `sysop.go`, and `aprs.go` discards the returned
-error (`_ = a.saveBoards(...)`), so a `SQLITE_BUSY` at commit is also silent.
+`boards.go`, `bulletins.go`, `sysop.go`, and `aprs.go` discarded the returned
+error (`_ = a.saveBoards(...)`), so a `SQLITE_BUSY` at commit was also silent.
 
-**Fix:** stop rewriting tables. Give each mutation a narrow SQL statement —
-`INSERT` a message, `UPDATE` one user row, `DELETE` one board — so concurrent
-writers touch disjoint rows. Where a full rewrite is genuinely needed, guard it
-with a monotonically increasing `version` column and fail the write if the
-snapshot is stale, rather than clobbering. `saveUsers` should update only the
-keys it actually changed, never delete by omission. Do this before anything
-else in this list; it is the difference between a BBS that loses posts and one
-that does not.
+**Fix (implemented 2026-11-10).** Persistence is now row-level. `bbs/cmd/bbs/mutations.go`
+is the only place that writes:
 
-### H3. Stored terminal-escape injection into other users' terminals
+- **One row per operation.** `createMessage` / `createMessageRow` insert a
+  single message or reply at `MAX(position)+1` among its siblings;
+  `updateMessageRow` updates one message's subject, body, and edited stamp;
+  `deleteMessageSubtree` deletes one thread's rows. `createBoard`,
+  `renameBoardRow`, `deleteBoardRow`, `createBulletin`, `updateBulletinRow`,
+  `deleteBulletinRow`, `saveUser`, and `deleteUser` follow the same shape. No
+  statement deletes rows it was not asked to delete, so two sessions posting to
+  the same board touch disjoint rows and cannot erase each other.
+- **Compound edits are one transaction.** A board rename changes the board row
+  and moves every message to the new `board_id` in a single transaction, so a
+  failure cannot orphan a board's messages. Deleting a message removes its
+  replies in the same transaction. `deleteUser` removes the account and its
+  APRS history together.
+- **`_txlock=immediate` on the DSN** (`database.go`). Every transaction now
+  takes the write lock at `BEGIN` instead of upgrading at its first write.
+  Without it, two processes can both begin a deferred read transaction, then
+  both try to upgrade — one gets `SQLITE_BUSY` and, under the old code, that
+  error was discarded. With it, writers queue on `_busy_timeout=5000` and
+  proceed one at a time. `SetMaxOpenConns(1)` still bounds each process; the
+  immediate lock is what bounds the processes.
+- **Seeding is transactional.** `seedDefaultData` runs its count check and its
+  inserts inside one immediate transaction, so two simultaneous first logins no
+  longer both insert the default bulletins and board.
+- **The bulk-replace primitive is gone from the binary.** `replaceAllUsers`,
+  `replaceAllBoards`, and `replaceAllBulletins` now live in
+  `bbs/cmd/bbs/fixtures_test.go`, so they are compiled only into the test
+  binary. This is the mechanism half of the fix: a future caller cannot
+  reintroduce the pattern on a request path even by accident.
+- **Missed rows no longer materialise as orphans.** `createMessageRow`
+  materialises the board row when the UI is showing the virtual `General`
+  board, so a post cannot be written to a `board_id` that no board row names.
+- **Errors reach the user.** Every rewritten path propagates the persistence
+  error to `showMutationError`, which logs it and displays it, instead of
+  reporting success for a write that did not happen (see M7).
+
+**Verification.** New `bbs/cmd/bbs/concurrency_test.go`: a two-handle
+`TestConcurrentPostsDoNotLoseEachOthersMessages` that reads both snapshots
+before either write; `TestConcurrentWritesFromTwoSessionsAllLand` (20 posts split across two
+handles, all 20 must land); `TestStaleSessionCannotDeleteAnotherSessionsAccount`
+(the exact user-table probe from this review, now asserting survival);
+`TestConcurrentProfileSavesDoNotOverwriteEachOther`; `TestLoginDoesNotRewriteOtherAccounts`;
+plus rename/delete/subtree-trim correctness tests and
+`TestDatabaseOpensWithImmediateTransactions`.
+
+These tests were checked for sensitivity, not just for passing: temporarily
+restoring the old `DELETE FROM db_messages` behaviour inside `createMessageRow`
+makes the first two fail exactly as this review described (`a concurrent post
+was lost: [from-bob]`, `total messages = 1, want 20`); restoring the fix makes
+them pass. `gofmt -l` clean, `go vet ./...` clean, `go test ./cmd/bbs` passes
+with 70.5% statement coverage (CI floor 60%), and `go test -race ./cmd/bbs`
+passes.
+
+**Residual risk.** SQLite still serialises writers, so a busy BBS serialises
+writes and waits up to the 5 s busy timeout before failing. Message positions
+are computed as `MAX(position)+1` inside the immediate transaction, which is
+safe against concurrent inserts but leaves gaps after deletes; ordering only
+ever relies on relative position, so gaps are harmless. `AutoMigrate` still
+runs on every connection (see the architecture section).
+
+### H3. Stored terminal-escape injection into other users' terminals — FIXED
 
 **Files:** `bbs/cmd/bbs/ui.go:93-99`, `ui.go:865-902`, `boards.go:164-197`,
 `boards.go:237-243`, `bulletins.go:42-60`, `screens.go:5-28`, and the
@@ -149,12 +207,76 @@ Note that the APRS paths already get this right: `singleLineAPRSDetail()`
 (`aprs.go:366-383`) strips control characters before storage and display, and
 every APRS render site uses it. That is the pattern to generalise.
 
-**Fix:** sanitise at the storage boundary, not the render site — strip or
-escape C0/C1 controls and `ESC` on write for every user-supplied field
-(subject, body, full name, QTH, rig, board name, description), so no future
-render path can reintroduce the hole. Also apply a render-time sanitiser in
-`showInfo`/`showInfoActions`/`runMenu` as defence in depth. Keep the existing
-`singleLineAPRSDetail` behaviour as the reference implementation.
+**Fix (implemented 2026-11-10).** The rule now lives in one place and is
+enforced at three boundaries plus startup:
+
+- **One rule: `bbs/cmd/bbs/sanitize.go`.** `sanitizeTerminalText(text, multiline)`
+  normalises CRLF/CR to LF, replaces invalid UTF-8 with U+FFFD, drops ESC, C0/C1
+  controls and DEL (via `unicode.IsControl`), turns tabs into spaces, and caps
+  blank-line runs at two. It also drops the printable-but-invisible characters
+  that can spoof a terminal or its surrounding renderer: bidi overrides and
+  isolates (U+202A–U+202E, U+2066–U+2069), directional marks (U+200E/U+200F,
+  U+061C), zero-width space (U+200B), word joiner (U+2060), soft hyphen
+  (U+00AD), BOM (U+FEFF), and the Unicode line/paragraph separators
+  (U+2028/U+2029). ZWJ and ZWNJ are deliberately kept because they are required
+  for correct shaping in scripts this BBS serves. `sanitizeSingleLineText`
+  collapses whitespace for one-line fields; `sanitizeMultilineText` keeps
+  paragraph breaks; `sanitizeFieldText(kind, text)` picks the rule for a form
+  field kind and leaves passwords and choice values byte-exact. The function is
+  idempotent, so overlapping boundaries cannot corrupt content.
+- **On input.** `formModel.validate()` (`ui.go`) passes every interactive field
+  through `sanitizeFieldText` after its normaliser and before the required and
+  validator checks. This is the mechanism guarantee: a future screen cannot
+  skip it, and a field containing only escapes fails its `required` check
+  instead of being stored blank.
+- **On write.** Each persistence path cleans its own values even when a form is
+  bypassed: `postMessageToBoard` and `replyToMessage` (`boards.go`),
+  `editBoardMessage`, `addBoard`, `renameBoard` (`sysop.go`), `addBulletin`,
+  `editBulletinAt` (`bulletins.go`), and `applyProfileValues` (`auth.go`, which
+  also serves the sysop user editor). Required fields that sanitise to empty are
+  rejected with a visible "required" screen, and the confirmation screens and
+  log lines now use the cleaned values rather than the raw form input.
+- **On read.** `loadBoardMessages`/`loadBoards`, `loadBulletins`, and
+  `loadUsers` sanitise as they build in-memory rows. This is what repairs data
+  written before this fix — and data written by any future path that forgets
+  the write guards — without a migration: bad text simply cannot reach a
+  renderer. It is also why render-time sanitising was not the right layer:
+  `showInfo`/`showInfoActions` receive strings that already carry the
+  application's own Lip Gloss styling, so cleaning them there would strip the
+  app's formatting along with the attack.
+- **At startup.** `newApp` cleans `BBS_NAME`, `BBS_SYSOP`, `BBS_LOCATION`, and
+  `BBS_WELCOME_TOPIC`, which reach the banner and header through the same
+  renderers as user text.
+
+`singleLineAPRSDetail` now delegates to `sanitizeSingleLineText`, so the APRS
+screens that already behaved correctly and the rest of the UI finally share one
+implementation instead of two.
+
+**Verification.** New `bbs/cmd/bbs/sanitize_test.go` covers: a 19-case unit
+table (CSI clear, OSC 52 clipboard, bare ESC, C1 CSI, C1 control, DEL, bidi
+override, isolate, zero-width space, BOM, tab, newline in a one-line field,
+CRLF, lone CR, blank-line run, invalid UTF-8, accented Latin, CJK); idempotence;
+the form boundary (a payload mixing C0 controls with a bidi override and a
+zero-width space, because the Bubbles widgets strip the former but keep the
+latter — verified against the vendored `runeutil` sanitizer; plus a check that
+the password field is left byte-exact); a post → store → load →
+render end-to-end check that the old `messageMenuLabel` and `wrapText` paths no
+longer carry escapes; replies and bulletins; board names and profile fields;
+a legacy-row test that inserts hostile text straight into the database and
+asserts every loader cleans it; and a rejection test for escape-only input.
+`gofmt -l` clean, `go vet ./...` clean, `go test ./cmd/bbs` passes with 71.5%
+statement coverage (CI floor is 60%). One existing assertion in
+`content_test.go` was relaxed from "description is exactly 120 bytes" to "at
+most 120, at least 100" because reading now trims the trailing space that the
+byte clip can leave behind — the clipping behaviour itself is unchanged.
+
+**Residual risk.** `translations.json` is operator-controlled and is not
+sanitised; it is a trusted file, but it is still shell/screen-visible text. The
+sanitiser removes control and format characters, not visual spoofing: homoglyphs
+and legitimate right-to-left text can still reorder glyphs inside a fixed-width
+panel, and no fixed-width TUI can fully prevent that. Cleaning happens on read,
+so a repaired row is only rewritten in the database the next time that record is
+saved; until then the stored bytes stay hostile but unreachable.
 
 ### H4. Publicly known default SSH password, published on all interfaces
 
@@ -294,20 +416,29 @@ Docker's own log driver, which already handles this). If the hand-rolled
 rotator stays, hold an exclusive `flock` across the copy-and-truncate window
 and have appenders take a shared lock.
 
-### M7. Persistence errors are discarded, so success is reported when nothing was written
+### M7. Persistence errors are discarded, so success is reported when nothing was written — FIXED IN THE REWRITTEN PATHS
 
-**Files:** `bbs/cmd/bbs/boards.go:179,213`, `bbs/cmd/bbs/bulletins.go:99,119,129`,
-`bbs/cmd/bbs/sysop.go:149,203,266,284,303,326,379`,
-`bbs/cmd/bbs/auth.go:16,44,60,72,123`, `bbs/cmd/bbs/aprs.go:62`
+**Files (as found):** `boards.go`, `bulletins.go`, `sysop.go`, `auth.go`,
+`aprs.go`
 
-Every `saveBoards`, `saveBulletins`, and `saveUsers` call site ignores the
-returned error (`_ = a.saveBoards(*data)`), and the UI paths then tell the user
-the post succeeded. With H2's contention and no `_txlock=immediate`, a `SQLITE_BUSY` at
-commit becomes a silently lost write that the UI reports as saved.
+Every `saveBoards`, `saveBulletins`, and `saveUsers` call site ignored the
+returned error (`_ = a.saveBoards(*data)`), and the UI paths then told the user
+the post succeeded. With H2's contention and no `_txlock=immediate`, a
+`SQLITE_BUSY` at commit became a silently lost write that the UI reported as
+saved.
 
-**Fix:** propagate the error, show a failure screen, and log the underlying
-cause. This is cheap and turns silent data loss into visible, actionable
-failure.
+**Fix (implemented 2026-11-10).** Every persistence call site that H2 touched
+now handles its error: board post and reply, board create/rename/delete,
+message edit/delete, bulletin create/edit/delete, user create/update/delete,
+sysop toggle, profile change, APRS enable, and the two APRS history deletes.
+`showMutationError` (`ui.go`) logs the failure (`action=persistence_error`) and
+displays it instead of a success screen. No `_ = a.save…` or `_ = a.delete…`
+remains outside tests.
+
+Residual: `showBulletins`, `stationDirectory`, and similar read paths still
+ignore their load errors (`bulletins, _ := a.loadBulletins()`), so a failed read
+still renders as an empty list rather than an error. That is a read-path
+decision, not a lost write.
 
 ### M8. Unbounded reply depth
 
@@ -386,16 +517,18 @@ count replies toward the same 500-message budget.
 The design is coherent for its size — one binary, a forced command, SQLite, and
 a terminal UI — but three structural choices create most of the risk above.
 
-**1. The persistence layer is "read everything, write everything".**
-`loadBoards()` reads all boards and all messages (recursively), and
-`saveBoards()` deletes and re-inserts all of them. A single message post is
-`O(all messages in all boards)` of writes and a delete-and-recreate of every
-row, including rows another session may have just created. This is why H2
-exists and why it cannot be fixed with a mutex (the writers are separate
-processes). Replace with row-level CRUD: `INSERT` a message, `UPDATE` a
-subject, `DELETE` a subtree. Keep a `version` column if you need optimistic
-concurrency. Add a real migration story instead of `AutoMigrate` on every
-startup.
+**1. The persistence layer was "read everything, write everything".**
+`loadBoards()` read all boards and all messages (recursively), and the caller
+mutated that copy; `saveBoards()` then deleted and re-inserted every row. A
+single message post was `O(all messages in all boards)` of writes, including
+rows another session had just created. That is H2, and it could not be fixed
+with a mutex because the writers are separate processes. It is now row-level
+CRUD with immediate transactions (see H2). What remains of the design budget:
+`loadBoards()` still reads every message of every board into memory for the
+board picker, which is `O(total messages)` per screen. That is a scalability
+limit, not a correctness bug; a paginated `COUNT` query per board would fix it.
+`AutoMigrate` still runs on every startup for every session — a real migration
+step is still worth adding.
 
 **2. Every SSH connection pays the global startup cost, including a DDL pass.**
 `main()` runs `newApp()` → `AutoMigrate` → `seedData()` →
@@ -450,10 +583,11 @@ claim is honest.
   per hash, algorithm and iteration count stored with the hash, constant-time
   comparison via `subtle.ConstantTimeCompare` (`storage.go:119-143`). Format is
   upgradeable even though no rehash path exists yet.
-- **SQL injection.** All queries go through GORM's placeholder binding
-  (`Where("... = ?", x)`); the only raw `Exec` calls are constant strings
-  (`DELETE FROM db_messages`, `boards.go:37,40`). No user input reaches a
-  query string.
+- **SQL injection.** Every query goes through GORM's placeholder binding
+  (`Where("... = ?", x)`, `Delete(&row, "callsign = ?", key)`). The raw `Exec`
+  calls that used to exist (`DELETE FROM db_messages`, `DELETE FROM db_boards`)
+  are gone with the H2 fix, so there is no raw SQL left at all. No user input
+  reaches a query string.
 - **Command execution.** The only `exec.Command` is
   `exec.Command(os.Executable(), "aprs-receiver")` — no shell, no user input
   (`aprs_supervisor.go:58`). No template engine, no `eval`, no dynamic
@@ -471,14 +605,14 @@ claim is honest.
   they survive container restarts (`docker-entrypoint.sh:36-58`).
 - **Inbound APRS text handling.** `singleLineAPRSDetail()` strips C0/C1 controls
   and normalises whitespace before storage and display, and every APRS render
-  site uses it (`aprs.go:366-383`). This is the correct pattern — it is the
-  rest of the UI that lacks it (H3).
+  site uses it (`aprs.go:366-383`). It now delegates to the shared rule in
+  `sanitize.go`, so APRS and the rest of the UI have one implementation (H3).
 - **Ack matching scope.** `markSentAPRSAck()` filters on
   `(user_callsign, from, to, message_id)`, so a stray ack cannot mark another
   user's message acknowledged (`aprs.go`).
 - **Intra-process database concurrency.** `SetMaxOpenConns(1)` plus WAL plus
-  `busy_timeout=5000` (`database.go:90,98`) makes a single process safe; the
-  remaining races are inter-process (H2).
+  `busy_timeout=5000` bounds each process; `_txlock=immediate` (added with the
+  H2 fix) serialises read-then-write transactions across processes.
 - **Concurrent stdout writes.** `supervisorOutputMu` serialises the four log
   tailers and rotation messages (`aprs_supervisor.go:18,193-219`).
 - **Input validation.** Callsigns, Maidenhead locators, emails, APRS SSIDs and
@@ -492,16 +626,16 @@ claim is honest.
 
 ## Suggested order of work
 
-1. **H2** — row-level persistence. Everything else that touches data is
-   fragile until this lands.
+1. ~~**H2** — row-level persistence~~ — **done** (see H2: single-row writes,
+   immediate transactions, row-level tests, and a sensitivity check).
 2. **H1** — stop auto-granting sysop from `BBS_SYSOPS`, and decide how a
    callsign is proven.
-3. **H3** — sanitise user text at the storage boundary (one function, applied
-   everywhere, mirroring `singleLineAPRSDetail`).
+3. ~~**H3** — sanitise user text at the storage boundary~~ — **done** (see H3:
+   one rule, enforced on input, write, read, and startup, with regression tests).
 4. **H4** — refuse to start on the placeholder password; scope
    `PermitEmptyPasswords`.
-5. **M5, M7** — dependency update and error propagation: small, mechanical,
-   immediately useful.
+5. **M5** — dependency update; ~~M7~~ — **done** in the paths H2 rewrote (see
+   M7; read paths still ignore load errors).
 6. **M1, M2** — rate limits at the two places untrusted input arrives (BBS
    login, APRS inbound).
 7. **M3, M4** — CI and image pinning.
@@ -512,9 +646,17 @@ claim is honest.
 This review read the code and ran the project's own checks plus three targeted
 probes. It did not run the container, the SSH server, fail2ban, or a live
 APRS-IS session, so anything that depends on runtime configuration (iptables
-behaviour in the shared namespace, guest mode, actual Bubble Tea input
-filtering for the textarea) is reasoned from configuration and source rather
-than observed. The `textarea` path in H3 in particular deserves a live check:
-if the component filters `ESC` on input, the body-based injection narrows to
-content imported or edited by other means, though the subject and profile-field
-paths do not go through that component at all.
+behaviour in the shared namespace, guest mode) is reasoned from configuration
+and source rather than observed. The `textarea` question that H3 originally
+left open — whether the component filters `ESC` on input — no longer changes the
+outcome: text is sanitised on write and again on read, so content arrives clean
+whether or not the widget filters anything. Bubble Tea's `textinput.SetValue`
+was checked in the vendored source and does strip control characters, which is
+why the password field needed no special handling.
+
+The H2 work was verified with unit-level concurrency tests against two database
+handles on one file, which is the same isolation the separate SSH processes
+have, but it was not exercised with two live SSH sessions against a running
+container. SQLite's locking behaviour under real multi-process load (including
+the 5 s busy timeout under sustained contention) is therefore reasoned from the
+`_txlock=immediate` and `busy_timeout` settings rather than observed.

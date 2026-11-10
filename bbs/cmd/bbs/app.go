@@ -31,6 +31,12 @@ func newApp() (*app, error) {
 		aprsPort:             port,
 		aprsReceiverCallsign: env("APRS_RECEIVER_CALLSIGN", ""),
 	}
+	// Operator-supplied labels reach the same renderers as user text, so clean
+	// them once at startup rather than trusting every screen to remember.
+	cfg.name = sanitizeSingleLineText(cfg.name)
+	cfg.sysopName = sanitizeSingleLineText(cfg.sysopName)
+	cfg.location = sanitizeSingleLineText(cfg.location)
+	cfg.topic = sanitizeSingleLineText(cfg.topic)
 	text := map[string]map[string]any{}
 	if err := readJSON(cfg.transFile, &text, map[string]map[string]any{}); err != nil {
 		return nil, err

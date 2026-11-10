@@ -87,7 +87,12 @@ type dbAPRSReceived struct {
 }
 
 func openDatabase(path string) (*gorm.DB, error) {
-	db, err := gorm.Open(sqlite.Open(path+"?_busy_timeout=5000&_journal_mode=WAL"), &gorm.Config{})
+	// _txlock=immediate makes every transaction take the write lock at BEGIN
+	// instead of at its first write. Each SSH session is its own process, so
+	// this is what serialises concurrent read-then-write transactions instead
+	// of letting two of them interleave and lose an update. _busy_timeout makes
+	// the waiting writer block rather than fail.
+	db, err := gorm.Open(sqlite.Open(path+"?_busy_timeout=5000&_journal_mode=WAL&_txlock=immediate"), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
@@ -102,25 +107,32 @@ func openDatabase(path string) (*gorm.DB, error) {
 	return db, nil
 }
 
+// seedDefaultData inserts the starter bulletins and board. Every SSH connection
+// runs this, so the count check and the inserts share one immediate transaction:
+// two simultaneous logins serialise, and the second sees the first one's rows
+// instead of inserting a duplicate set.
 func (a *app) seedDefaultData() error {
-	var count int64
-	if err := a.db.Model(&dbBulletin{}).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		bulletins := []bulletin{
-			{Title: "Welcome", Body: "This is a small HamNet-ready BBS for radio operators.\nUse it for local notes, net announcements, and station contact info.", Updated: now()},
-			{Title: "Operating Notes", Body: "Keep traffic courteous and relevant to amateur radio.\nDo not post private keys, passwords, or third-party personal data.", Updated: now()},
-		}
-		if err := a.saveBulletins(bulletins); err != nil {
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&dbBulletin{}).Count(&count).Error; err != nil {
 			return err
 		}
-	}
-	if err := a.db.Model(&dbBoard{}).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return a.saveBoards(boardsData{Boards: []board{defaultBoard(nil)}})
-	}
-	return nil
+		if count == 0 {
+			for _, b := range []bulletin{
+				{Title: "Welcome", Body: "This is a small HamNet-ready BBS for radio operators.\nUse it for local notes, net announcements, and station contact info.", Updated: now()},
+				{Title: "Operating Notes", Body: "Keep traffic courteous and relevant to amateur radio.\nDo not post private keys, passwords, or third-party personal data.", Updated: now()},
+			} {
+				if _, err := createBulletinRow(tx, b); err != nil {
+					return err
+				}
+			}
+		}
+		if err := tx.Model(&dbBoard{}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return createBoardRow(tx, defaultBoard(nil))
+		}
+		return nil
+	})
 }

@@ -94,6 +94,7 @@ type userProfile struct {
 }
 
 type bulletin struct {
+	ID      uint   `json:"id,omitempty"`
 	Title   string `json:"title"`
 	Body    string `json:"body"`
 	Updated string `json:"updated"`
@@ -101,6 +102,7 @@ type bulletin struct {
 }
 
 type message struct {
+	ID      uint      `json:"id,omitempty"`
 	From    string    `json:"from"`
 	Subject string    `json:"subject"`
 	Body    string    `json:"body"`

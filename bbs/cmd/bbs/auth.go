@@ -12,8 +12,10 @@ func (a *app) authenticate() (string, userProfile, error) {
 	if err != nil {
 		return "", userProfile{}, err
 	}
-	if changed := a.applyConfiguredSysops(users); changed {
-		_ = a.saveUsers(users)
+	for _, callsign := range a.applyConfiguredSysops(users) {
+		if err := a.saveUser(callsign, users[callsign]); err != nil {
+			return "", userProfile{}, err
+		}
 	}
 	failedAttempts := map[string]int{}
 	for {
@@ -41,7 +43,9 @@ func (a *app) authenticate() (string, userProfile, error) {
 				return "", userProfile{}, errLoginCancelled
 			}
 			users[callsign] = profile
-			_ = a.saveUsers(users)
+			if err := a.saveUser(callsign, profile); err != nil {
+				return "", userProfile{}, err
+			}
 			return callsign, profile, nil
 		}
 		lang := profile.Language
@@ -57,7 +61,9 @@ func (a *app) authenticate() (string, userProfile, error) {
 				return "", userProfile{}, errLoginCancelled
 			}
 			users[callsign] = profile
-			_ = a.saveUsers(users)
+			if err := a.saveUser(callsign, profile); err != nil {
+				return "", userProfile{}, err
+			}
 			return callsign, profile, nil
 		}
 		if verifyPassword(password, profile.PasswordHash) {
@@ -69,7 +75,9 @@ func (a *app) authenticate() (string, userProfile, error) {
 			}
 			profile.LastSeen = now()
 			users[callsign] = profile
-			_ = a.saveUsers(users)
+			if err := a.saveUser(callsign, profile); err != nil {
+				return "", userProfile{}, err
+			}
 			return callsign, profile, nil
 		}
 		failedAttempts[callsign]++
@@ -119,8 +127,15 @@ func (a *app) changeProfile(callsign string, profile userProfile, lang string) u
 		profile.PasswordHash = hashPassword(values["new_password"])
 	}
 	profile.LastSeen = now()
-	users[callsign] = profile
-	_ = a.saveUsers(users)
+	if err := a.saveUser(callsign, profile); err != nil {
+		// Do not hand the caller a profile that was never stored: it drives the
+		// session language and every later screen.
+		if stored, ok, loadErr := a.loadUser(callsign); loadErr == nil && ok {
+			profile = stored
+		}
+		a.showMutationError(lang, a.t(lang, "profile_form_title"), err)
+		return profile
+	}
 	a.showInfo(profile.Language, a.t(profile.Language, "profile_updated"), profileRows(a, profile.Language, profile))
 	return profile
 }
@@ -149,12 +164,12 @@ func (a *app) profileFields(profile userProfile, required, includePassword bool)
 }
 
 func applyProfileValues(profile userProfile, values map[string]string) userProfile {
-	profile.FullName = values["full_name"]
-	profile.Email = values["email"]
-	profile.Maidenhead = values["maidenhead"]
-	profile.Language = values["language"]
+	profile.FullName = sanitizeSingleLineText(values["full_name"])
+	profile.Email = sanitizeSingleLineText(values["email"])
+	profile.Maidenhead = sanitizeSingleLineText(values["maidenhead"])
+	profile.Language = sanitizeSingleLineText(values["language"])
 	profile.EnableAPRS = values["enable_aprs"] == "true"
-	profile.QTH = values["qth"]
-	profile.Rig = values["rig"]
+	profile.QTH = sanitizeSingleLineText(values["qth"])
+	profile.Rig = sanitizeSingleLineText(values["rig"])
 	return profile
 }

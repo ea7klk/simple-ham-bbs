@@ -204,7 +204,7 @@ func TestStoreReceivedAPRSOnlyEnabledUsers(t *testing.T) {
 		"EA7KLK": {EnableAPRS: true},
 		"EA1OFF": {EnableAPRS: false},
 	}
-	if err := a.saveUsers(users); err != nil {
+	if err := a.replaceAllUsers(users); err != nil {
 		t.Fatal(err)
 	}
 	_, saved, err := a.storeReceivedAPRS(receivedAPRS{At: now(), From: "EA1ABC-7", To: "EA7KLK-0", Text: "Enabled{2044", Raw: "one"})
@@ -229,7 +229,7 @@ func TestStoreReceivedAPRSOnlyEnabledUsers(t *testing.T) {
 
 func TestStoreReceivedAPRSRejectsAckAndRej(t *testing.T) {
 	a := testApp(t)
-	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {EnableAPRS: true}}); err != nil {
+	if err := a.replaceAllUsers(map[string]userProfile{"EA7KLK": {EnableAPRS: true}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, text := range []string{"ack42", "rej42"} {
@@ -453,7 +453,7 @@ func TestReceivedAPRSHistoryLimitAndDelete(t *testing.T) {
 
 func TestNormalizeReceivedAPRSStore(t *testing.T) {
 	a := testApp(t)
-	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {EnableAPRS: true}}); err != nil {
+	if err := a.replaceAllUsers(map[string]userProfile{"EA7KLK": {EnableAPRS: true}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := a.addReceivedRecord("EA7KLK", receivedAPRS{

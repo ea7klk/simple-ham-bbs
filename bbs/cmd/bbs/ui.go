@@ -417,6 +417,10 @@ func (m formModel) validate() (map[string]string, string) {
 		if f.normalizer != nil {
 			value = f.normalizer(value)
 		}
+		// Every interactive form value passes through the terminal-text rule
+		// here, so no screen can hand control characters to a renderer even if
+		// a future write path forgets to sanitise its own input.
+		value = strings.TrimSpace(sanitizeFieldText(f.kind, value))
 		if f.limit > 0 && len(value) > f.limit {
 			value = value[:f.limit]
 		}
@@ -852,6 +856,13 @@ func (m infoModel) renderActions() string {
 
 func (m infoModel) maxOffset() int {
 	return max(0, len(m.lines)-1)
+}
+
+// showMutationError reports a failed write to the caller. Silently discarding a
+// persistence error is how a lost post used to look like a successful one.
+func (a *app) showMutationError(lang, title string, err error) {
+	a.logBBSAction("", "persistence_error", "screen=%q error=%q", title, err.Error())
+	a.showInfo(lang, title, [][]string{{errorStyle.Render(err.Error())}})
 }
 
 func (a *app) showInfo(lang, title string, rows [][]string) {

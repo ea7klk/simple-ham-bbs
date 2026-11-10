@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"gorm.io/gorm"
 )
@@ -58,8 +57,9 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 			if ok {
 				profile.EnableAPRS = values["enable_aprs"] == "true"
 				profile.LastSeen = now()
-				users[callsign] = profile
-				_ = a.saveUsers(users)
+				if err := a.saveUser(callsign, profile); err != nil {
+					a.showMutationError(lang, a.t(lang, "aprs_enable_title"), err)
+				}
 			}
 		case "q":
 			return profile
@@ -97,7 +97,10 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 		switch action {
 		case "d":
 			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
-				_ = a.deleteReceivedRecord(history[idx].ID)
+				if err := a.deleteReceivedRecord(history[idx].ID); err != nil {
+					a.showMutationError(lang, a.t(lang, "aprs_received_message_detail"), err)
+					continue
+				}
 				a.logBBSAction(callsign, "aprs_received_delete", "from=%q at=%q", history[idx].From, history[idx].At)
 			}
 		case "r":
@@ -228,7 +231,10 @@ func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
 		action := a.showInfoActions(lang, a.t(lang, "aprs_sent_message_detail"), a.aprsSentDetailRows(lang, history[idx]), []option{{"q", a.t(lang, "back_button")}, {"d", a.t(lang, "delete_button")}})
 		if action == "d" {
 			if a.confirmDelete(lang, a.t(lang, "confirm_delete_aprs_message")) {
-				_ = a.deleteSentRecord(history[idx].ID)
+				if err := a.deleteSentRecord(history[idx].ID); err != nil {
+					a.showMutationError(lang, a.t(lang, "aprs_sent_message_detail"), err)
+					continue
+				}
 				a.logBBSAction(callsign, "aprs_sent_delete", "to=%q at=%q", history[idx].To, history[idx].At)
 			}
 		}
@@ -363,22 +369,11 @@ func (a *app) aprsReceivedDetailRows(lang string, item receivedAPRS) [][]string 
 	return rows
 }
 
+// singleLineAPRSDetail renders APRS text on one line and strips terminal
+// controls. The rules live in sanitizeTerminalText so every user-facing surface
+// shares one implementation.
 func singleLineAPRSDetail(text string) string {
-	text = strings.ToValidUTF8(text, "�")
-	var cleaned strings.Builder
-	for _, r := range text {
-		switch {
-		case r == '\n' || r == '\r' || r == '\t':
-			cleaned.WriteByte(' ')
-		case unicode.IsControl(r):
-			// C1 controls can appear when UTF-8 text was decoded as Latin-1
-			// (for example the U+009F in mojibaked emoji text). Never pass
-			// terminal controls through an APRS screen.
-		default:
-			cleaned.WriteRune(r)
-		}
-	}
-	return strings.Join(strings.Fields(cleaned.String()), " ")
+	return sanitizeSingleLineText(text)
 }
 
 func (a *app) showSendingAPRS(lang, destination string) {

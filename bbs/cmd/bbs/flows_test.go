@@ -200,7 +200,7 @@ func TestAuthenticationRegistrationAndProfileFlows(t *testing.T) {
 func TestScreenAndBulletinFlows(t *testing.T) {
 	a := testApp(t)
 	installBasicText(a)
-	if err := a.saveUsers(map[string]userProfile{
+	if err := a.replaceAllUsers(map[string]userProfile{
 		"EA7KLK": {FullName: "Volker", Maidenhead: "IM77AH", Language: "en"},
 		"EA1OFF": {FullName: "Disabled", Disabled: true},
 	}); err != nil {
@@ -268,13 +268,13 @@ func TestBoardAndSysopFlows(t *testing.T) {
 	a := testApp(t)
 	installBasicText(a)
 	a.cfg.bbsLogFile = t.TempDir() + "/bbs.log"
-	if err := a.saveUsers(map[string]userProfile{
+	if err := a.replaceAllUsers(map[string]userProfile{
 		"EA7KLK": {FullName: "Volker", Email: "v@example.com", Language: "en", IsSysop: true},
 		"EA1ABC": {FullName: "Alice", Email: "a@example.com", Language: "en", LastSeen: "2026-07-10 10:00 UTC"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.saveBoards(boardsData{Boards: []board{{ID: "general", Name: "General", Description: "General", Messages: []message{{From: "EA1ABC", Subject: "Root", Body: "Body", Created: now()}}}}}); err != nil {
+	if err := a.replaceAllBoards(boardsData{Boards: []board{{ID: "general", Name: "General", Description: "General", Messages: []message{{From: "EA1ABC", Subject: "Root", Body: "Body", Created: now()}}}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +402,7 @@ func TestAPRSMenusAndRows(t *testing.T) {
 	a.text["en"]["aprs_parts"] = "parts"
 	a.text["en"]["aprs_sent_status_sent"] = "Sent"
 	a.text["en"]["aprs_sent_status_failed"] = "Failed"
-	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {Language: "en", EnableAPRS: false}}); err != nil {
+	if err := a.replaceAllUsers(map[string]userProfile{"EA7KLK": {Language: "en", EnableAPRS: false}}); err != nil {
 		t.Fatal(err)
 	}
 	menuQueue := []string{"6", "q"}
@@ -459,7 +459,7 @@ func TestSendAPRSReturnsToMenuAfterSuccess(t *testing.T) {
 	} {
 		a.text["en"][key] = key
 	}
-	if err := a.saveUsers(map[string]userProfile{"EA7KLK": {Language: "en", EnableAPRS: true}}); err != nil {
+	if err := a.replaceAllUsers(map[string]userProfile{"EA7KLK": {Language: "en", EnableAPRS: true}}); err != nil {
 		t.Fatal(err)
 	}
 	a.cfg.aprsServer = "127.0.0.1"

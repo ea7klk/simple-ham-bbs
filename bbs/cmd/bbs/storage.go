@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -25,76 +26,56 @@ func (a *app) loadUsers() (map[string]userProfile, error) {
 		if upper == "" {
 			continue
 		}
-		users[upper] = userProfile{
-			FullName:     row.FullName,
-			Email:        row.Email,
-			Maidenhead:   row.Maidenhead,
-			Language:     row.Language,
-			EnableAPRS:   row.EnableAPRS,
-			QTH:          row.QTH,
-			Rig:          row.Rig,
-			PasswordHash: row.PasswordHash,
-			IsSysop:      row.IsSysop,
-			Disabled:     row.Disabled,
-			FirstSeen:    row.FirstSeen,
-			LastSeen:     row.LastSeen,
-		}
+		users[upper] = profileFromRow(row)
 	}
 	return users, err
 }
 
-func (a *app) saveUsers(users map[string]userProfile) error {
-	return a.db.Transaction(func(tx *gorm.DB) error {
-		var existing []dbUser
-		if err := tx.Find(&existing).Error; err != nil {
-			return err
-		}
-		keep := map[string]bool{}
-		for key, profile := range users {
-			callsign := normalizeCallsign(key)
-			if callsign == "" {
-				continue
-			}
-			keep[callsign] = true
-			row := dbUser{
-				Callsign:     callsign,
-				FullName:     profile.FullName,
-				Email:        profile.Email,
-				Maidenhead:   profile.Maidenhead,
-				Language:     profile.Language,
-				EnableAPRS:   profile.EnableAPRS,
-				QTH:          profile.QTH,
-				Rig:          profile.Rig,
-				PasswordHash: profile.PasswordHash,
-				IsSysop:      profile.IsSysop,
-				Disabled:     profile.Disabled,
-				FirstSeen:    profile.FirstSeen,
-				LastSeen:     profile.LastSeen,
-			}
-			if err := tx.Save(&row).Error; err != nil {
-				return err
-			}
-		}
-		for _, row := range existing {
-			if !keep[row.Callsign] {
-				if err := tx.Delete(&dbUser{}, "callsign = ?", row.Callsign).Error; err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
+func profileFromRow(row dbUser) userProfile {
+	return userProfile{
+		FullName:     sanitizeSingleLineText(row.FullName),
+		Email:        sanitizeSingleLineText(row.Email),
+		Maidenhead:   sanitizeSingleLineText(row.Maidenhead),
+		Language:     row.Language,
+		EnableAPRS:   row.EnableAPRS,
+		QTH:          sanitizeSingleLineText(row.QTH),
+		Rig:          sanitizeSingleLineText(row.Rig),
+		PasswordHash: row.PasswordHash,
+		IsSysop:      row.IsSysop,
+		Disabled:     row.Disabled,
+		FirstSeen:    row.FirstSeen,
+		LastSeen:     row.LastSeen,
+	}
 }
 
-func (a *app) applyConfiguredSysops(users map[string]userProfile) bool {
-	changed := false
+func (a *app) loadUser(callsign string) (userProfile, bool, error) {
+	key := normalizeCallsign(callsign)
+	if key == "" {
+		return userProfile{}, false, nil
+	}
+	row := dbUser{}
+	err := a.db.Where("callsign = ?", key).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return userProfile{}, false, nil
+	}
+	if err != nil {
+		return userProfile{}, false, err
+	}
+	return profileFromRow(row), true, nil
+}
+
+// applyConfiguredSysops flags accounts listed in BBS_SYSOPS and returns the
+// callsigns it changed, so the caller can persist exactly those rows.
+func (a *app) applyConfiguredSysops(users map[string]userProfile) []string {
+	changed := []string{}
 	for callsign := range a.cfg.sysops {
 		if profile, ok := users[callsign]; ok && !profile.IsSysop {
 			profile.IsSysop = true
 			users[callsign] = profile
-			changed = true
+			changed = append(changed, callsign)
 		}
 	}
+	sort.Strings(changed)
 	return changed
 }
 
