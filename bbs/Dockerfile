@@ -9,7 +9,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/bbs_app ./cmd/bbs
 
 FROM alpine:3.20
 
-RUN apk add --no-cache bash ca-certificates fail2ban iproute2 iptables openssh-server sqlite tini
+RUN apk add --no-cache bash ca-certificates iproute2 openssh-server sqlite tini
 
 RUN addgroup -S bbs \
     && adduser -S -D -h /home/bbs -s /bin/bash -G bbs bbs \
@@ -18,8 +18,6 @@ RUN addgroup -S bbs \
     && chmod 700 /home/bbs/.ssh
 
 COPY sshd_config /etc/ssh/sshd_config
-COPY fail2ban/fail2ban.local /etc/fail2ban/fail2ban.local
-COPY fail2ban/jail.local /etc/fail2ban/jail.local
 COPY --from=build /out/bbs_app /usr/local/bin/bbs_app
 COPY translations.json /usr/local/bin/translations.json
 COPY bbs_session.sh /usr/local/bin/bbs_session.sh

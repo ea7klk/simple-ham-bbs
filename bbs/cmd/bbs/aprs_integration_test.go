@@ -248,10 +248,9 @@ func TestAPRSReceiverRecipientAndCleanupHelpers(t *testing.T) {
 func TestAPRSLogRotationAndSupervisorHelpers(t *testing.T) {
 	dir := t.TempDir()
 	a := &app{cfg: config{
-		aprsLogFile:     filepath.Join(dir, "aprs", "aprs.log"),
-		bbsLogFile:      filepath.Join(dir, "bbs.log"),
-		authLogFile:     filepath.Join(dir, "auth.log"),
-		fail2banLogFile: filepath.Join(dir, "fail2ban.log"),
+		aprsLogFile: filepath.Join(dir, "aprs", "aprs.log"),
+		bbsLogFile:  filepath.Join(dir, "bbs.log"),
+		authLogFile: filepath.Join(dir, "auth.log"),
 	}}
 	if err := a.ensureRuntimeLogFiles(); err != nil {
 		t.Fatal(err)
@@ -272,8 +271,8 @@ func TestAPRSLogRotationAndSupervisorHelpers(t *testing.T) {
 	if logBase(a.cfg.aprsLogFile) != "aprs" {
 		t.Fatalf("logBase = %q", logBase(a.cfg.aprsLogFile))
 	}
-	if got := len(a.runtimeLogFiles()); got != 4 {
-		t.Fatalf("runtimeLogFiles count = %d, want 4", got)
+	if got := len(a.runtimeLogFiles()); got != 3 {
+		t.Fatalf("runtimeLogFiles count = %d, want 3", got)
 	}
 
 	if archive, rotated, err := rotateLog(a.cfg.aprsLogFile, nowTime); err != nil || rotated || archive != "" {
@@ -319,17 +318,11 @@ func TestAPRSLogRotationAndSupervisorHelpers(t *testing.T) {
 	if err := os.WriteFile(a.cfg.authLogFile, []byte("auth\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(a.cfg.fail2banLogFile, []byte("fail2ban\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := a.rotateRuntimeLogs(nowTime.Add(24 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if active, _ := os.ReadFile(a.cfg.authLogFile); len(active) != 0 {
 		t.Fatalf("auth log was not rotated: %q", active)
-	}
-	if active, _ := os.ReadFile(a.cfg.fail2banLogFile); len(active) != 0 {
-		t.Fatalf("fail2ban log was not rotated: %q", active)
 	}
 
 	if err := os.WriteFile(a.cfg.bbsLogFile, []byte("abc"), 0o644); err != nil {

@@ -20,7 +20,6 @@ func newApp() (*app, error) {
 		aprsLogFile:          filepath.Join(dataDir, "aprs", "aprs.log"),
 		bbsLogFile:           filepath.Join(dataDir, "bbs.log"),
 		authLogFile:          env("BBS_AUTH_LOG_FILE", "/var/log/auth.log"),
-		fail2banLogFile:      env("BBS_FAIL2BAN_LOG_FILE", "/var/log/fail2ban.log"),
 		transFile:            env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
 		name:                 env("BBS_NAME", "HAMNET RADIO BBS"),
 		sysopName:            env("BBS_SYSOP", "Sysop"),

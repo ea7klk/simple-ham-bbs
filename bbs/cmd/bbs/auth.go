@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"strings"
+	"time"
 )
 
 var errLoginCancelled = errors.New("login cancelled")
@@ -17,8 +18,14 @@ func (a *app) authenticate() (string, userProfile, error) {
 			return "", userProfile{}, err
 		}
 	}
+	address := clientAddress()
 	failedAttempts := map[string]int{}
 	for {
+		// Address-level lockout, shared across sessions through the database.
+		if remaining, err := a.authLockedRemaining(address, time.Now()); err == nil && remaining > 0 {
+			a.logBBSAction("", "login_locked", "address=%q remaining=%s", address, remaining.Truncate(time.Second))
+			return "", userProfile{}, errors.New(a.t("en", "too_many_attempts"))
+		}
 		var header strings.Builder
 		for _, code := range languageOrder {
 			header.WriteString(languages[code] + ": " + truncateText(strings.Join(a.tList(code, "login_info"), " "), panelContentWidth-12) + "\n")
@@ -78,9 +85,24 @@ func (a *app) authenticate() (string, userProfile, error) {
 			if err := a.saveUser(callsign, profile); err != nil {
 				return "", userProfile{}, err
 			}
+			// A successful login clears the address's failures.
+			if err := a.clearAuthFailures(address); err != nil {
+				a.logBBSAction(callsign, "ratelimit_clear_failed", "address=%q error=%q", address, err.Error())
+			}
 			return callsign, profile, nil
 		}
 		failedAttempts[callsign]++
+		locked, lockErr := a.recordAuthFailure(address, time.Now())
+		if lockErr != nil {
+			// Never fail open on a broken counter, but do not lock the operator
+			// out of their own BBS either: log it and fall back to the
+			// per-session limit below.
+			a.logBBSAction(callsign, "ratelimit_error", "address=%q error=%q", address, lockErr.Error())
+		}
+		if locked {
+			a.logBBSAction(callsign, "login_lockout", "address=%q limit=%d window=%s", address, authFailureLimit, authFailureWindow)
+			return "", userProfile{}, errors.New(a.t(lang, "too_many_attempts"))
+		}
 		if failedAttempts[callsign] >= 3 {
 			return "", userProfile{}, errors.New(a.t(lang, "too_many_attempts"))
 		}

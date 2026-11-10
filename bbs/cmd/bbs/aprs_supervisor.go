@@ -24,7 +24,6 @@ func (a *app) runAPRSSupervisor() error {
 	go tailLogFile(a.cfg.aprsLogFile)
 	go tailLogFile(a.cfg.bbsLogFile)
 	go tailLogFile(a.cfg.authLogFile)
-	go tailLogFile(a.cfg.fail2banLogFile)
 	go a.rotateRuntimeLogsNightly()
 
 	a.logAPRSReceiver("APRS supervisor started; nightly log rotation at 03:00 UTC, retention=7 days")
@@ -46,7 +45,7 @@ func (a *app) ensureRuntimeLogFiles() error {
 }
 
 func (a *app) runtimeLogFiles() []string {
-	return []string{a.cfg.aprsLogFile, a.cfg.bbsLogFile, a.cfg.authLogFile, a.cfg.fail2banLogFile}
+	return []string{a.cfg.aprsLogFile, a.cfg.bbsLogFile, a.cfg.authLogFile}
 }
 
 func (a *app) watchAPRSReceiver() error {
@@ -78,6 +77,11 @@ func (a *app) rotateRuntimeLogsNightly() {
 		time.Sleep(durationUntilNextLogRotation(time.Now().UTC()))
 		if err := a.rotateRuntimeLogs(time.Now().UTC()); err != nil {
 			a.logAPRSReceiver("Log rotation error: %v", err)
+		}
+		// Nightly housekeeping rides the same timer: expire stale login-throttle
+		// counters so the table cannot grow without bound.
+		if err := a.pruneAuthFailures(time.Now().UTC()); err != nil {
+			a.logAPRSReceiver("Login throttle prune error: %v", err)
 		}
 	}
 }
