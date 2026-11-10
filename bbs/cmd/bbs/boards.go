@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -46,23 +47,24 @@ func (a *app) loadBoardMessages(boardID string) []message {
 		}
 		byParent[parent] = append(byParent[parent], row)
 	}
-	var build func(uint) []message
-	build = func(parent uint) []message {
+	var build func(uint, int) []message
+	build = func(parent uint, depth int) []message {
 		out := []message{}
 		for _, row := range byParent[parent] {
 			out = append(out, message{
 				ID:      row.ID,
+				Depth:   depth,
 				From:    sanitizeSingleLineText(row.From),
 				Subject: sanitizeSingleLineText(row.Subject),
 				Body:    sanitizeMultilineText(row.Body),
 				Created: row.Created,
 				Edited:  sanitizeSingleLineText(row.Edited),
-				Replies: build(row.ID),
+				Replies: build(row.ID, depth+1),
 			})
 		}
 		return out
 	}
-	return build(0)
+	return build(0, 0)
 }
 
 type threadedMessage struct {
@@ -159,8 +161,12 @@ func (a *app) readMessage(callsign, lang string, data *boardsData, boardIdx int,
 	if msg == nil {
 		return true
 	}
+	actions := []option{{"q", a.t(lang, "back_button")}}
+	if msg.Depth < maxReplyDepth {
+		actions = []option{{"r", a.t(lang, "reply_button")}, {"q", a.t(lang, "back_button")}}
+	}
 	for {
-		action := a.showInfoActions(lang, msg.Subject, [][]string{{a.t(lang, "message_board"), data.Boards[boardIdx].Name}, {a.t(lang, "from"), msg.From}, {a.t(lang, "at"), msg.Created}, {"Text", msg.Body}}, []option{{"r", a.t(lang, "reply_button")}, {"q", a.t(lang, "back_button")}})
+		action := a.showInfoActions(lang, msg.Subject, [][]string{{a.t(lang, "message_board"), data.Boards[boardIdx].Name}, {a.t(lang, "from"), msg.From}, {a.t(lang, "at"), msg.Created}, {"Text", msg.Body}}, actions)
 		if action != "r" {
 			return true
 		}
@@ -194,6 +200,10 @@ func (a *app) replyToMessage(callsign, lang string, data *boardsData, boardIdx i
 	}
 	parentID := parentMsg.ID
 	if _, err := a.createMessage(data.Boards[boardIdx].ID, &parentID, message{From: callsign, Subject: subject, Body: body, Created: now()}); err != nil {
+		if errors.Is(err, errThreadTooDeep) {
+			a.showInfo(lang, a.t(lang, "message_reply_title"), [][]string{{errorStyle.Render(a.t(lang, "thread_too_deep"))}})
+			return false
+		}
 		a.showMutationError(lang, a.t(lang, "message_reply_title"), err)
 		return false
 	}

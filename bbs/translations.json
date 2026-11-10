@@ -170,7 +170,8 @@
     "confirm_delete_bulletin": "Bulletin \"%s\" löschen?",
     "confirm_delete_field": "Löschen bestätigen",
     "confirm_delete_message": "Nachricht \"%s\" löschen?",
-    "sysop_manage_bulletins": "Bulletins verwalten"
+    "sysop_manage_bulletins": "Bulletins verwalten",
+    "thread_too_deep": "Verschachtelte Antworten sind auf 5 Ebenen begrenzt."
   },
   "en": {
     "about_graphics": "Graphics: plain ANSI text, suitable for simple terminals.",
@@ -343,7 +344,8 @@
     "confirm_delete_bulletin": "Delete bulletin \"%s\"?",
     "confirm_delete_field": "Confirm deletion",
     "confirm_delete_message": "Delete message \"%s\"?",
-    "sysop_manage_bulletins": "Manage bulletins"
+    "sysop_manage_bulletins": "Manage bulletins",
+    "thread_too_deep": "Replies can be nested at most 5 levels deep."
   },
   "es": {
     "about_graphics": "Gráficos: texto ANSI simple, apto para terminales sencillos.",
@@ -516,7 +518,8 @@
     "confirm_delete_bulletin": "¿Borrar el boletín \"%s\"?",
     "confirm_delete_field": "Confirmar borrado",
     "confirm_delete_message": "¿Borrar el mensaje \"%s\"?",
-    "sysop_manage_bulletins": "Gestionar boletines"
+    "sysop_manage_bulletins": "Gestionar boletines",
+    "thread_too_deep": "Las respuestas pueden anidarse como máximo 5 niveles."
   },
   "fr": {
     "about_graphics": "Graphismes : texte ANSI simple, adapté aux terminaux simples.",
@@ -689,6 +692,7 @@
     "confirm_delete_bulletin": "Supprimer le bulletin \"%s\" ?",
     "confirm_delete_field": "Confirmer la suppression",
     "confirm_delete_message": "Supprimer le message \"%s\" ?",
-    "sysop_manage_bulletins": "Gérer les bulletins"
+    "sysop_manage_bulletins": "Gérer les bulletins",
+    "thread_too_deep": "Les réponses ne peuvent pas être imbriquées sur plus de 5 niveaux."
   }
 }

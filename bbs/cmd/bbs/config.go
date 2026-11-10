@@ -28,6 +28,11 @@ const (
 	menuOptionColumnWidth       = 3
 )
 
+// maxReplyDepth bounds how deep replies may nest below a top-level message, so
+// a thread is at most maxReplyDepth+1 rows deep. Only top-level messages count
+// toward the per-board message budget; replies are bounded by this depth.
+const maxReplyDepth = 5
+
 var (
 	callsignRE     = regexp.MustCompile(`^[A-Z0-9][A-Z0-9/-]{2,15}$`)
 	aprsCallsignRE = regexp.MustCompile(`^[A-Z0-9]{1,10}(-[0-9]{1,2})?$`)
@@ -101,12 +106,15 @@ type bulletin struct {
 }
 
 type message struct {
-	ID      uint      `json:"id,omitempty"`
-	From    string    `json:"from"`
-	Subject string    `json:"subject"`
-	Body    string    `json:"body"`
-	Created string    `json:"created"`
-	Edited  string    `json:"edited,omitempty"`
+	ID      uint   `json:"id,omitempty"`
+	From    string `json:"from"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+	Created string `json:"created"`
+	Edited  string `json:"edited,omitempty"`
+	// Depth is 0 for a top-level message and increases by one per reply level.
+	// It is derived when loading, not stored.
+	Depth   int       `json:"-"`
 	Replies []message `json:"replies,omitempty"`
 }
 

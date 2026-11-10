@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -143,7 +144,44 @@ func (a *app) createMessage(boardKey string, parentID *uint, msg message) (uint,
 	return id, err
 }
 
+var errThreadTooDeep = fmt.Errorf("thread nesting exceeds %d levels", maxReplyDepth)
+
+// messageDepth returns how many levels below the top level id sits: 0 for a
+// top-level message, 1 for its reply, and so on. A corrupt parent chain
+// terminates instead of looping forever.
+func messageDepth(db *gorm.DB, id uint) (int, error) {
+	depth := 0
+	current := id
+	for {
+		if depth > maxReplyDepth {
+			return depth, errThreadTooDeep
+		}
+		row := dbMessage{}
+		err := db.Select("id", "parent_id").Where("id = ?", current).Take(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return depth, nil
+		}
+		if err != nil {
+			return depth, err
+		}
+		if row.ParentID == nil {
+			return depth, nil
+		}
+		current = *row.ParentID
+		depth++
+	}
+}
+
 func createMessageRow(db *gorm.DB, boardKey string, parentID *uint, msg message) (uint, error) {
+	if parentID != nil {
+		parentDepth, err := messageDepth(db, *parentID)
+		if err != nil {
+			return 0, err
+		}
+		if parentDepth+1 > maxReplyDepth {
+			return 0, errThreadTooDeep
+		}
+	}
 	// A message on a board with no row would be invisible: loadBoards() reads
 	// boards from the table, so the orphan would never be rendered. The UI
 	// renders a virtual "General" board when the table is empty, so materialise
