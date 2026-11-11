@@ -774,11 +774,27 @@ thread.
   referenced it. Anyone who wants to poke at APRS-IS directly can write the
   ten-line socket client in a scratch directory; it does not belong in this
   repository.
-- **L5. World-readable data files.** The SQLite database, `bbs.log`, and
-  `aprs.log` are created `0644` (`logging.go:12`, `aprs_supervisor.go:39`).
-  Inside a single-purpose container this is tolerable, but the database holds
-  every user's email and password hash, and `aprs.log` holds full message text
-  including packets from third parties. `0600`/`0640` is strictly better.
+- **L5. World-readable data files — ACCEPTED (shared with the web BBS).** The
+  SQLite database, `bbs.log`, and `aprs.log` are created `0644` (`logging.go`,
+  `aprs_supervisor.go`). The database holds every user's email and password
+  hash, and `aprs.log` holds message text including third-party packets, so
+  `0600`/`0640` would be strictly better *in isolation*.
+
+  It is not isolated: `/var/lib/bbs` is a volume shared with the companion web
+  BBS, which reads the same database. Verified on the live cluster: both
+  `deployment/bbs` and `deployment/bbs-web` mount the same claim at
+  `/var/lib/bbs`, and `bbs-web` can open `bbs.sqlite` today precisely because of
+  the `0644` mode. Tightening the files would break the web front end unless
+  both images agreed on a shared uid/gid, which is a cross-repository change to
+  a service this one does not own.
+
+  The mode is also not the boundary here. Both containers run as `root` inside
+  their own namespaces, and the real access control is the host path's
+  permissions on `/opt/stacks/ham-bbs/data/bbs` plus container isolation — a
+  `0600` file owned by `bbs` would be just as readable to a root process as a
+  `0644` one. Accepted on that basis, with the caveat recorded: if the web BBS
+  ever moves to a non-root uid, the two images should agree on a group and the
+  files should move to `0640` together.
 - **L6. `/etc/bbs/bbs.env` is `0644` and sourced by bash**
   (`docker-entrypoint.sh:10-18`, `bbs_session.sh:4-9`). It deliberately excludes
   `BBS_USER_PASSWORD`, and `printf '%q'` quoting is correct, so this is safe as
