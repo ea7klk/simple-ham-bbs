@@ -191,7 +191,10 @@ func (m *mailer) Send(msg mailMessage) error {
 func (m *mailer) smtpSend(msg mailMessage) error {
 	address := net.JoinHostPort(m.cfg.host, strconv.Itoa(m.cfg.port))
 	dialer := &net.Dialer{Timeout: mailDialTimeout}
-	deadline := m.now().Add(mailTotalTimeout)
+	// The socket deadline is wall-clock, deliberately not m.now: that clock is
+	// overridable for deterministic headers, and a test pinning it to a past
+	// date would otherwise set a deadline that has already expired.
+	deadline := time.Now().Add(mailTotalTimeout)
 	tlsConfig := &tls.Config{ServerName: m.cfg.host, MinVersion: tls.VersionTLS12}
 
 	conn, err := dialer.Dial("tcp", address)
