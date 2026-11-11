@@ -2,8 +2,8 @@
 
 Date: 2026-11-10
 Scope: the whole repository at `main` (`a5b114d`) — the Go BBS
-(`bbs/cmd/bbs/`, ~4.5k lines plus ~2.8k of tests), container/SSH/WireGuard infrastructure, CI
-workflow, and the helper script `aprs-test.py`.
+(`bbs/cmd/bbs/`, ~4.5k lines plus ~2.8k of tests), container/SSH/WireGuard
+infrastructure, and the CI workflow.
 Reviewer: automated review, not a formal audit. This document finds defects; it
 does not prove their absence.
 
@@ -11,7 +11,7 @@ does not prove their absence.
 
 - Read every Go source file, `Dockerfile`, `docker-entrypoint.sh`,
   `bbs_session.sh`, `sshd_config`, both compose files, the fail2ban jails, the
-  workflow, and `aprs-test.py`.
+  workflow, and the then-present `aprs-test.py` (removed under L4).
 - Ran `go vet ./...` (clean), `go test ./cmd/bbs` (pass, 4.4 s), and
   `govulncheck ./...` (one reachable advisory, see M5).
 - Ran three throwaway probes against the real code, then deleted them:
@@ -762,12 +762,18 @@ thread.
   self-registration (which H1 already notes as possible follow-up work) or
   making the directory private, and neither is warranted for a community BBS
   whose point is that operators can find each other.
-- **L4. `aprs-test.py` is a stray development script.** It contains a real
-  callsign and its derived APRS-IS passcode (`:6-7`) and, if run, sends live
-  packets. APRS passcodes are a public function of the callsign, so this is not
-  a leaked credential — but the file belongs in a scratch directory, not the
-  repository root next to production code, and it should not be runnable by
-  accident.
+- **L4. `aprs-test.py` is a stray development script — FIXED (removed).** It
+  carried a real callsign and its derived APRS-IS passcode and, if run, opened
+  a live APRS-IS session. The passcode is a public function of the callsign, so
+  nothing secret leaked, but the file sat in the repository root next to
+  production code and was one `python3 aprs-test.py` away from generating
+  traffic from the operator's station.
+
+  Removed. It was a scratch script from the pre-Go prototype, superseded by the
+  receiver in `aprs_receiver.go`, and nothing in the build, tests or deployment
+  referenced it. Anyone who wants to poke at APRS-IS directly can write the
+  ten-line socket client in a scratch directory; it does not belong in this
+  repository.
 - **L5. World-readable data files.** The SQLite database, `bbs.log`, and
   `aprs.log` are created `0644` (`logging.go:12`, `aprs_supervisor.go:39`).
   Inside a single-purpose container this is tolerable, but the database holds
