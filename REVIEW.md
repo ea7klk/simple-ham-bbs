@@ -711,12 +711,21 @@ thread.
 
 ## Low / notes
 
-- **L1. Predictable APRS message IDs.** `aprsMessageIDs()` (`aprs.go:901-925`)
-  seeds from `time.Now().UnixMilli()` plus the callsign characters, not from a
-  CSPRNG, and `markSentAPRSAck()` accepts any ack matching
-  `(user, from, to, id)`. A third party who guesses the next ID can pre-ack a
-  message. Use `crypto/rand` for the 5-character ID; the collision cost is
-  negligible and acks become unforgeable-by-guessing.
+- **L1. Predictable APRS message IDs — ACCEPTED.** `aprsMessageIDs()`
+  (`aprs.go`) seeds from `time.Now().UnixMilli()` plus the callsign characters
+  rather than a CSPRNG, and `markSentAPRSAck()` accepts any ack matching
+  `(user, from, to, id)`, so a third party who guesses the next ID can pre-ack a
+  message.
+
+  Accepted because an unpredictable ID would not buy anything: **APRS-IS
+  broadcasts every packet in clear text.** Anyone who wants to forge an ack
+  reads the real message ID off the wire — no guessing required — so moving from
+  a timestamp-seeded ID to `crypto/rand` would remove a shortcut nobody needs
+  while adding an entropy source whose failure modes are harder to reason
+  about. APRS has no authentication to strengthen here; the ack is advisory
+  (it marks a local history row as acknowledged) and cannot be used to change
+  state on another station. Randomising the ID would also make the IDs harder to
+  correlate with the sent history during support work, for no security gain.
 - **L2. Unmetered registration cost.** Creating an account runs
   `hashPassword()` at 200k PBKDF2 iterations (`storage.go:119-124`). Any caller
   can create unlimited accounts, each costing deliberate CPU. Rate-limit
