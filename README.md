@@ -313,11 +313,16 @@ Then restart the Deployment so the entrypoint re-reads the environment.
 again, remove the key (`patch` with `"BBS_SMTP_PASSWORD":null`) or blank it;
 either leaves the app with no usable password and it stays off.
 
-`bbs-smtp` holds only the non-secret settings, and it is owned by Fleet: an edit
-to it — a password included — is reverted within seconds, which is why
-`BBS_SMTP_PASSWORD` does not exist there at all. `bbs-env` is read after
-`bbs-smtp`, so anything you put there wins. Change host, port or sender in
-`spainip/infra`; change only the password in the cluster.
+Both Secrets are hand-managed and editable in Rancher. `bbs-env` is read after
+`bbs-smtp`, so a key present in both resolves to the `bbs-env` value — which is
+why the password lives only there and `bbs-smtp` has no `BBS_SMTP_PASSWORD` key.
+
+`bbs-smtp` was declared in the Fleet bundle until 2026-11-11. That made it
+Fleet-owned with drift correction on, so edits were reverted within seconds and
+appeared as "the change did not persist". It is now a plain object: edits stick,
+but it is no longer versioned in Git and Fleet will not recreate it if deleted.
+Its non-secret values, and the procedure for taking a Secret out of Fleet, are
+recorded in `spainip/infra` `HAM-BBS-EMAIL.md`.
 
 Both steps are needed: the Secret holds the value, and the Deployment only reads
 its environment at container start, so a restart is what makes a new password
