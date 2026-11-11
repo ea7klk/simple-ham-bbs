@@ -192,6 +192,10 @@ The supplied WireGuard profile has these public/non-secret values:
 
 The private key you pasted is deliberately not written into tracked files. Put it only in `hamnet/wg_confs/wg0.conf` or rotate it before using this repository anywhere public.
 
+Reaching the BBS and the web BBS **over** HamNET is a separate piece of work that
+is not yet in place; `HAMNET.md` records what is missing, why a full-tunnel
+profile would break public access, and the proposed topology.
+
 ## APRS Messaging
 
 The APRS menu currently lets each user set `Enable APRS` to `true` or `false`
