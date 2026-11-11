@@ -753,10 +753,15 @@ thread.
   without recording never charges, prune behaviour, and two end-to-end paths
   through `authenticate()` — one blocked before the form, one charged exactly
   once.
-- **L3. User enumeration.** Unknown callsigns go to a registration form, known
-  ones to a password prompt (`auth.go:35-44`). The station directory already
-  lists every active user to any logged-in caller, so this is informational
-  rather than secret-leaking.
+- **L3. User enumeration — ACCEPTED (by design).** Unknown callsigns go to a
+  registration form, known ones to a password prompt (`auth.go`). Accepted:
+  the station directory lists every active callsign, full name and locator to
+  any logged-in caller, and registration is open by design — "does this
+  callsign have an account here?" is public information on this service, not a
+  secret the login flow could protect. Obscuring it would mean either closing
+  self-registration (which H1 already notes as possible follow-up work) or
+  making the directory private, and neither is warranted for a community BBS
+  whose point is that operators can find each other.
 - **L4. `aprs-test.py` is a stray development script.** It contains a real
   callsign and its derived APRS-IS passcode (`:6-7`) and, if run, sends live
   packets. APRS passcodes are a public function of the callsign, so this is not
