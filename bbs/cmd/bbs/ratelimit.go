@@ -126,3 +126,75 @@ func (a *app) pruneAuthFailures(at time.Time) error {
 	cutoff := at.Add(-authFailureRetention).Unix()
 	return a.db.Where("window_start < ? AND locked_until < ?", cutoff, at.Unix()).Delete(&dbAuthFailure{}).Error
 }
+
+// Registration throttling (L2).
+//
+// Creating an account costs a 200k-iteration PBKDF2 hash, and nothing limited
+// how many accounts one caller could create. The limit is generous enough for a
+// club station where several operators share an address, and small enough that
+// walking the address space to burn CPU is not worthwhile.
+
+const (
+	// registrationWindow is the period over which new accounts are counted.
+	registrationWindow = time.Hour
+	// registrationLimit is how many accounts one address may create per window.
+	registrationLimit = 5
+	// registrationRetention is how long an idle counter row is kept.
+	registrationRetention = 24 * time.Hour
+)
+
+// dbRegistration counts new accounts created from one client address.
+type dbRegistration struct {
+	Address     string `gorm:"primaryKey;size:64"`
+	Count       int
+	WindowStart int64
+}
+
+// registrationAllowed reports whether address may create another account now.
+//
+// It does not consume a slot: a caller that opens the registration form and
+// cancels must not be charged. The count is incremented by
+// recordRegistration once an account actually exists. The check-then-record gap
+// can therefore be crossed twice by simultaneous registrations from one
+// address, which overshoots the limit by at most the number of concurrent
+// sessions — bounded, and harmless for a limit that exists to stop bulk
+// creation.
+func (a *app) registrationAllowed(address string, at time.Time) (bool, error) {
+	row := dbRegistration{}
+	err := a.db.Where("address = ?", address).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if at.Sub(time.Unix(row.WindowStart, 0)) > registrationWindow {
+		return true, nil
+	}
+	return row.Count < registrationLimit, nil
+}
+
+// recordRegistration counts one created account against address.
+func (a *app) recordRegistration(address string, at time.Time) error {
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		row := dbRegistration{}
+		err := tx.Where("address = ?", address).Take(&row).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) || at.Sub(time.Unix(row.WindowStart, 0)) > registrationWindow {
+			row = dbRegistration{Address: address, WindowStart: at.Unix()}
+		}
+		row.Count++
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "address"}},
+			UpdateAll: true,
+		}).Create(&row).Error
+	})
+}
+
+// pruneRegistrations drops counters that have been idle past their retention.
+func (a *app) pruneRegistrations(at time.Time) error {
+	cutoff := at.Add(-registrationRetention).Unix()
+	return a.db.Where("window_start < ?", cutoff).Delete(&dbRegistration{}).Error
+}

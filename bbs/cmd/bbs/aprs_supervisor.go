@@ -84,6 +84,9 @@ func (a *app) rotateRuntimeLogsNightly() {
 		if err := a.pruneAuthFailures(time.Now().UTC()); err != nil {
 			a.logAPRSReceiver("Login throttle prune error: %v", err)
 		}
+		if err := a.pruneRegistrations(time.Now().UTC()); err != nil {
+			a.logAPRSReceiver("Registration throttle prune error: %v", err)
+		}
 	}
 }
 

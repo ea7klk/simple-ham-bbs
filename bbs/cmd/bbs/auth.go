@@ -45,6 +45,16 @@ func (a *app) authenticate() (string, userProfile, error) {
 		password := values["password"]
 		profile, exists := users[callsign]
 		if !exists {
+			// A new account costs a PBKDF2 hash, so it is metered per address.
+			allowed, limitErr := a.registrationAllowed(address, time.Now())
+			if limitErr != nil {
+				a.logBBSAction(callsign, "registration_throttle_error", "address=%q error=%q", address, limitErr.Error())
+				return "", userProfile{}, limitErr
+			}
+			if !allowed {
+				a.logBBSAction(callsign, "registration_blocked", "address=%q limit=%d window=%s", address, registrationLimit, registrationWindow)
+				return "", userProfile{}, errors.New(a.t("en", "registration_rate_limited"))
+			}
 			profile, ok = a.register(callsign, userProfile{Language: "en"}, true)
 			if !ok {
 				return "", userProfile{}, errLoginCancelled
@@ -52,6 +62,9 @@ func (a *app) authenticate() (string, userProfile, error) {
 			users[callsign] = profile
 			if err := a.saveUser(callsign, profile); err != nil {
 				return "", userProfile{}, err
+			}
+			if err := a.recordRegistration(address, time.Now()); err != nil {
+				a.logBBSAction(callsign, "registration_throttle_error", "address=%q error=%q", address, err.Error())
 			}
 			return callsign, profile, nil
 		}

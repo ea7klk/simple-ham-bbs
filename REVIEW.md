@@ -726,10 +726,33 @@ thread.
   (it marks a local history row as acknowledged) and cannot be used to change
   state on another station. Randomising the ID would also make the IDs harder to
   correlate with the sent history during support work, for no security gain.
-- **L2. Unmetered registration cost.** Creating an account runs
-  `hashPassword()` at 200k PBKDF2 iterations (`storage.go:119-124`). Any caller
-  can create unlimited accounts, each costing deliberate CPU. Rate-limit
-  registration per source address.
+- **L2. Unmetered registration cost — FIXED.** Creating an account runs
+  `hashPassword()` at 200k PBKDF2 iterations (`storage.go`), and nothing limited
+  how many accounts one caller could create, so walking the address space could
+  burn CPU at will.
+
+  `registrationAllowed` / `recordRegistration` (`ratelimit.go`) now meter new
+  accounts per client address: **five per hour**, reset on a rolling window and
+  pruned nightly with the login counters. Design notes:
+
+  - The check does not consume a slot. A caller who opens the registration form
+    and cancels is not charged; the count increments only after an account
+    exists. Two simultaneous registrations from one address can therefore
+    overshoot by one, which is bounded and acceptable for a limit aimed at bulk
+    creation.
+  - Only *new* accounts count. Completing an existing profile, or setting a
+    password on a half-registered account, is not metered — it creates no row
+    and costs one hash the user has already been entitled to.
+  - Five per hour leaves room for a club station where several operators share
+    one address, while keeping the cost of a per-address attack to a handful of
+    hashes.
+  - A block is logged (`registration_blocked`) and refused before the
+    registration form is drawn, so a limited caller cannot sit in the form.
+
+  Tests (`ratelimit_test.go`): the window and per-address budget, that checking
+  without recording never charges, prune behaviour, and two end-to-end paths
+  through `authenticate()` — one blocked before the form, one charged exactly
+  once.
 - **L3. User enumeration.** Unknown callsigns go to a registration form, known
   ones to a password prompt (`auth.go:35-44`). The station directory already
   lists every active user to any logged-in caller, so this is informational

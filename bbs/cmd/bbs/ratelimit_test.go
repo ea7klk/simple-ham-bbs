@@ -258,3 +258,141 @@ func TestFailedLoginsAccumulateAcrossSessions(t *testing.T) {
 		t.Fatal("address not locked after repeated sessions")
 	}
 }
+
+func TestRegistrationLimitIsPerAddressWindow(t *testing.T) {
+	a := testApp(t)
+	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+
+	for i := 0; i < registrationLimit; i++ {
+		allowed, err := a.registrationAllowed("203.0.113.7", at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !allowed {
+			t.Fatalf("blocked at registration %d of %d", i+1, registrationLimit)
+		}
+		if err := a.recordRegistration("203.0.113.7", at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allowed, err := a.registrationAllowed("203.0.113.7", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
+		t.Fatalf("allowed a registration past the limit of %d", registrationLimit)
+	}
+
+	// Another address keeps its own budget.
+	if ok, err := a.registrationAllowed("198.51.100.9", at); err != nil || !ok {
+		t.Fatalf("second address allowed=%v err=%v", ok, err)
+	}
+
+	// A fresh window resets the count.
+	later := at.Add(registrationWindow + time.Minute)
+	if ok, err := a.registrationAllowed("203.0.113.7", later); err != nil || !ok {
+		t.Fatalf("address still limited after the window: allowed=%v err=%v", ok, err)
+	}
+}
+
+func TestRegistrationIsNotChargedUntilRecorded(t *testing.T) {
+	a := testApp(t)
+	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < registrationLimit*2; i++ {
+		allowed, err := a.registrationAllowed("203.0.113.7", at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !allowed {
+			t.Fatalf("a cancelled registration charged the budget at check %d", i+1)
+		}
+	}
+}
+
+func TestPruneRegistrationsDropsIdleCounters(t *testing.T) {
+	a := testApp(t)
+	at := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	if err := a.db.Create(&dbRegistration{Address: "203.0.113.7", Count: 1, WindowStart: at.Unix()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.Create(&dbRegistration{Address: "198.51.100.9", Count: 9, WindowStart: at.Add(-registrationRetention - time.Hour).Unix()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := a.pruneRegistrations(at); err != nil {
+		t.Fatal(err)
+	}
+	var rows []dbRegistration
+	if err := a.db.Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Address != "203.0.113.7" {
+		t.Fatalf("prune kept %#v", rows)
+	}
+}
+
+// The limit is enforced on the real registration path, and the account it
+// refuses is never created.
+func TestAuthenticateBlocksRegistrationPastLimit(t *testing.T) {
+	a := testApp(t)
+	installBasicText(a)
+	a.text["en"]["registration_rate_limited"] = "Too many new accounts from this address. Try again later."
+	t.Setenv("SSH_CONNECTION", "203.0.113.7 51514 10.42.0.149 2222")
+	a.showInfoHook = func(lang, title string, rows [][]string) {}
+	for i := 0; i < registrationLimit; i++ {
+		if err := a.recordRegistration("203.0.113.7", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	formCalls := 0
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		formCalls++
+		return "submit", map[string]string{"callsign": "EA7KLK", "password": ""}, true
+	}
+	_, _, err := a.authenticate()
+	if err == nil || !strings.Contains(err.Error(), "Too many new accounts") {
+		t.Fatalf("authenticate() error = %v, want the registration limit", err)
+	}
+	users, loadErr := a.loadUsers()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if _, ok := users["EA7KLK"]; ok {
+		t.Fatal("account was created despite the limit")
+	}
+	// Only the login form is drawn; the registration form never opens.
+	if formCalls != 1 {
+		t.Fatalf("forms drawn = %d, want 1", formCalls)
+	}
+}
+
+// A successful registration consumes exactly one slot.
+func TestAuthenticateChargesOneRegistration(t *testing.T) {
+	a := testApp(t)
+	installBasicText(a)
+	t.Setenv("SSH_CONNECTION", "203.0.113.7 51514 10.42.0.149 2222")
+	a.showInfoHook = func(lang, title string, rows [][]string) {}
+	queue := []struct {
+		action string
+		values map[string]string
+		ok     bool
+	}{
+		{"submit", map[string]string{"callsign": "EA7KLK", "password": ""}, true},
+		{"save", formValues(nil), true},
+	}
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		next := queue[0]
+		queue = queue[1:]
+		return next.action, next.values, next.ok
+	}
+	if _, _, err := a.authenticate(); err != nil {
+		t.Fatal(err)
+	}
+	row := dbRegistration{}
+	if err := a.db.Where("address = ?", "203.0.113.7").Take(&row).Error; err != nil {
+		t.Fatalf("no registration recorded: %v", err)
+	}
+	if row.Count != 1 {
+		t.Fatalf("registrations recorded = %d, want 1", row.Count)
+	}
+}
