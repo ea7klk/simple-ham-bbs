@@ -79,6 +79,17 @@ install_authorized_keys() {
   fi
 }
 
+migrate_schema() {
+  # The schema migration is a one-shot: AutoMigrate walks every table and takes
+  # the write lock, so it must not run in every SSH session. Doing it here, before
+  # sshd starts accepting connections, means a session never has to wait for the
+  # supervisor and never races it.
+  if ! /usr/local/bin/bbs_app migrate; then
+    echo "$(date -u '+%Y-%m-%d %H:%M UTC') schema migration failed; refusing to start sshd." >&2
+    exit 1
+  fi
+}
+
 start_helper_processes() {
   (
     while true; do
@@ -95,6 +106,7 @@ prepare_runtime_dirs
 ensure_host_keys
 configure_fallback_route
 install_authorized_keys
+migrate_schema
 start_helper_processes
 
 exec "$@"

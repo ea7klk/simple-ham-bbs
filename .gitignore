@@ -9,3 +9,4 @@ __pycache__/
 
 # In-tree build output from `go build ./...` inside bbs/.
 bbs/bbs
+bbs/cmd/bbs/bbs

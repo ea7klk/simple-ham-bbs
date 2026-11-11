@@ -14,24 +14,34 @@ const (
 	sentHistoryLimit            = 200
 	receivedHistoryLimit        = 500
 	aprsReceiverRestartInterval = time.Hour
-	screenWidth                 = 132
-	screenHeight                = 24
-	panelBorderWidth            = 2
-	panelPaddingWidth           = 2
-	panelVerticalFrame          = 2
-	panelStyleWidth             = screenWidth - panelBorderWidth
-	panelContentWidth           = panelStyleWidth - panelPaddingWidth
-	panelContentHeight          = screenHeight - panelVerticalFrame
-	formInputWidth              = 72
-	formSingleLineMaxWidth      = 72
-	formTextAreaHeight          = 5
-	menuOptionColumnWidth       = 3
+	// schemaWaitTimeout bounds how long a session waits for the supervisor's
+	// one-shot migration before giving up with an explanation. The supervisor
+	// starts first in the container, so in practice this wait is microseconds;
+	// it exists so a missing migration is a clear message rather than a query
+	// against a table that does not exist.
+	schemaWaitTimeout      = 20 * time.Second
+	schemaPollInterval     = 100 * time.Millisecond
+	screenWidth            = 132
+	screenHeight           = 24
+	panelBorderWidth       = 2
+	panelPaddingWidth      = 2
+	panelVerticalFrame     = 2
+	panelStyleWidth        = screenWidth - panelBorderWidth
+	panelContentWidth      = panelStyleWidth - panelPaddingWidth
+	panelContentHeight     = screenHeight - panelVerticalFrame
+	formInputWidth         = 72
+	formSingleLineMaxWidth = 72
+	formTextAreaHeight     = 5
+	menuOptionColumnWidth  = 3
 )
 
 // maxReplyDepth bounds how deep replies may nest below a top-level message, so
 // a thread is at most maxReplyDepth+1 rows deep. Only top-level messages count
 // toward the per-board message budget; replies are bounded by this depth.
 const maxReplyDepth = 5
+
+// schemaWait bounds the wait in waitForSchema.
+var schemaWait = 20 * time.Second
 
 var (
 	callsignRE     = regexp.MustCompile(`^[A-Z0-9][A-Z0-9/-]{2,15}$`)

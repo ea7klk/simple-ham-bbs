@@ -5,6 +5,8 @@ import (
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 type dbUser struct {
@@ -105,16 +107,57 @@ func openDatabase(path string) (*gorm.DB, error) {
 		return nil, err
 	}
 	sqlDB.SetMaxOpenConns(1)
+	return db, nil
+}
+
+// migrateDatabase brings the schema up to date and records that it did.
+//
+// This used to run inside openDatabase, which meant every SSH session — its own
+// process — ran AutoMigrate and two backfills before it could show a login
+// prompt. AutoMigrate introspects every table, so the cost grew with the user
+// count: measured at 2.5 s per login at 5 000 users and 4.6 s at 10 000
+// (SCALABILITY.md). It also took the write lock on every connection.
+//
+// It now runs once, from the supervisor (or an explicit `bbs_app migrate`), and
+// records completion so a session can tell whether the one-shot has happened
+// without doing the work itself.
+func migrateDatabase(db *gorm.DB) error {
 	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAuthFailure{}, &dbRegistration{}, &dbActivation{}, &dbToken{}, &dbSetting{}); err != nil {
-		return nil, err
+		return err
 	}
 	if err := backfillRegistered(db); err != nil {
-		return nil, err
+		return err
 	}
 	if err := backfillActivated(db); err != nil {
-		return nil, err
+		return err
 	}
-	return db, nil
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		UpdateAll: true,
+	}).Create(&dbSetting{Key: schemaVersionKey, Value: schemaVersion}).Error
+}
+
+const (
+	// schemaVersionKey is the marker a session reads to know the one-shot
+	// migration has completed. It lives in db_settings, alongside the other
+	// migration markers.
+	schemaVersionKey = "schema.version"
+	// schemaVersion is bumped when a migration needs to run again after a code
+	// change; a session refuses to start against anything older.
+	schemaVersion = "1"
+)
+
+// schemaReady reports whether migrateDatabase has completed against this file.
+//
+// A missing table and a missing row are both normal answers here — a fresh
+// database has neither — so the query is not logged. The caller treats any error
+// as "not ready".
+func schemaReady(db *gorm.DB) bool {
+	var value string
+	err := db.Session(&gorm.Session{Logger: logger.Discard}).
+		Raw("SELECT value FROM db_settings WHERE key = ?", schemaVersionKey).
+		Scan(&value).Error
+	return err == nil && value == schemaVersion
 }
 
 // backfillActivated marks pre-existing accounts as activated.

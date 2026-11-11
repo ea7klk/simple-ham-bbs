@@ -147,6 +147,49 @@ func (a *app) banner(lang string) string {
 	return titleStyle.Render(line) + "\n" + subtitleStyle.Render(a.cfg.location+" - "+a.cfg.topic) + "\n\n"
 }
 
+// initialize runs the one-shot startup work for this database: the schema
+// migration and everything that used to be repeated by every SSH session.
+//
+// It is called once, by the supervisor or by `bbs_app migrate`, never from the
+// connection path. Sessions call waitForSchema instead, which is one indexed
+// read.
+func (a *app) initialize() error {
+	// Skip the expensive half when the schema is already current: the supervisor
+	// restarts after a crash, and re-running AutoMigrate on every restart would
+	// be work for nothing. seedData stays outside the guard because it seeds and
+	// reports, not only migrates.
+	if !schemaReady(a.db) {
+		if err := migrateDatabase(a.db); err != nil {
+			return err
+		}
+	}
+	return a.seedData()
+}
+
+// waitForSchema blocks until the one-shot migration has completed, then returns.
+//
+// A session process is not the right place to run a migration: AutoMigrate walks
+// every table and the cost grows with the user count, and it takes the write
+// lock. But a session must not run against an unmigrated file either, so it
+// waits briefly for the supervisor — which starts first in the container — and
+// then says plainly what to do rather than failing with a missing column.
+func (a *app) waitForSchema() error {
+	deadline := time.Now().Add(schemaWait)
+	for {
+		if schemaReady(a.db) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			a.logBBSAction("", "schema_not_ready", "waited=%s", schemaWait)
+			return fmt.Errorf("database schema is not ready (no %s=%s in db_settings); run `bbs_app migrate`", schemaVersionKey, schemaVersion)
+		}
+		time.Sleep(schemaPollInterval)
+	}
+}
+
+// seedData prepares the data directories, seeds the default board and bulletins,
+// and performs the startup reporting and sweeps. It is part of the one-shot
+// initialisation, not the connection path.
 func (a *app) seedData() error {
 	if err := os.MkdirAll(a.cfg.dataDir, 0o755); err != nil {
 		return err

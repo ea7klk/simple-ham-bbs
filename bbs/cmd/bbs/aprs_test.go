@@ -17,6 +17,11 @@ func testApp(t *testing.T) *app {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// openDatabase no longer migrates: that is the point of the change. The
+	// fixture does the one-shot itself, as the supervisor does in production.
+	if err := migrateDatabase(db); err != nil {
+		t.Fatal(err)
+	}
 	return &app{cfg: config{
 		dataDir:     dir,
 		dbFile:      filepath.Join(dir, "bbs.sqlite"),
