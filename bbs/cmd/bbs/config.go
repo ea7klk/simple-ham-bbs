@@ -76,6 +76,7 @@ type app struct {
 	db                  *gorm.DB
 	currentUser         string
 	currentUserIsSysop  bool
+	terminalError       error
 	runMenuHook         func(lang, title, header string, opts []option) string
 	runFormHook         func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool)
 	showInfoHook        func(lang, title string, rows [][]string)

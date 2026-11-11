@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -330,5 +332,98 @@ func TestInfoModelUpdateAndView(t *testing.T) {
 	}
 	if (infoModel{lines: lines}).maxOffset() != len(lines)-1 {
 		t.Fatal("maxOffset failed")
+	}
+}
+
+// A terminal failure must not look like a clean quit.
+func TestTerminalFailureIsRecordedAndReported(t *testing.T) {
+	a := testApp(t)
+	a.cfg.bbsLogFile = t.TempDir() + "/bbs.log"
+	a.text = map[string]map[string]any{"en": {}}
+
+	original := runTerminalProgram
+	defer func() { runTerminalProgram = original }()
+	boom := errors.New("input closed")
+	runTerminalProgram = func(tea.Model) (tea.Model, error) { return nil, boom }
+
+	if got := a.runMenu("en", "Title", "", []option{{"q", "Quit"}}); got != "q" {
+		t.Fatalf("runMenu() on error = %q, want q", got)
+	}
+	if a.terminalError == nil || !errors.Is(a.terminalError, boom) {
+		t.Fatalf("terminal error not recorded: %v", a.terminalError)
+	}
+	body, err := os.ReadFile(a.cfg.bbsLogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "terminal_error") || !strings.Contains(string(body), "input closed") {
+		t.Fatalf("terminal error not logged: %q", body)
+	}
+
+	if err := a.terminalFailure(); err == nil || !strings.Contains(err.Error(), "input closed") {
+		t.Fatalf("terminalFailure() = %v", err)
+	}
+}
+
+func TestTerminalFailure_FormAndInfoPathsAreRecorded(t *testing.T) {
+	a := testApp(t)
+	a.text = map[string]map[string]any{"en": {}}
+	original := runTerminalProgram
+	defer func() { runTerminalProgram = original }()
+	runTerminalProgram = func(tea.Model) (tea.Model, error) { return nil, errors.New("boom") }
+
+	if _, values, ok := a.runForm("en", "Title", nil, []string{"save"}); ok || values != nil {
+		t.Fatal("runForm reported success on a terminal error")
+	}
+	if a.terminalError == nil {
+		t.Fatal("runForm did not record the terminal error")
+	}
+
+	a.terminalError = nil
+	if got := a.showInfoActions("en", "Title", [][]string{{"x"}}, nil); got != "q" {
+		t.Fatalf("showInfoActions() on error = %q, want q", got)
+	}
+	if a.terminalError == nil {
+		t.Fatal("showInfoActions did not record the terminal error")
+	}
+}
+
+// A clean quit records nothing, so a normal logout still exits zero.
+func TestCleanQuitHasNoTerminalError(t *testing.T) {
+	a := testApp(t)
+	if a.terminalFailure() != nil {
+		t.Fatalf("terminalFailure() on a clean session = %v", a.terminalFailure())
+	}
+}
+
+// run() must exit non-zero when the session ended because the terminal failed,
+// instead of reporting a clean logout.
+func TestRunReportsTerminalFailureInsteadOfCleanQuit(t *testing.T) {
+	a := testApp(t)
+	installBasicText(a)
+	a.cfg.sysops = nil
+	a.showInfoHook = func(lang, title string, rows [][]string) {}
+
+	queue := []struct {
+		action string
+		values map[string]string
+		ok     bool
+	}{
+		{"submit", map[string]string{"callsign": "EA7KLK", "password": ""}, true},
+		{"save", formValues(nil), true},
+	}
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		next := queue[0]
+		queue = queue[1:]
+		return next.action, next.values, next.ok
+	}
+	a.runMenuHook = func(lang, title, header string, opts []option) string { return "q" }
+
+	// Simulate the terminal failing at some point during the session.
+	a.terminalError = errors.New("input closed")
+
+	err := a.run()
+	if err == nil || !strings.Contains(err.Error(), "input closed") {
+		t.Fatalf("run() = %v, want the terminal failure", err)
 	}
 }

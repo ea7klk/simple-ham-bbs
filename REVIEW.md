@@ -915,9 +915,25 @@ thread.
   its own change with a live test, not a tail-end addition to a review sweep.
   L9's deadline makes the current arrangement survivable in the meantime: the
   watchdog can no longer block forever.
-- **L11. TUI errors become a silent logout.** `runMenu()`
-  (`ui.go:672-683`) returns `"q"` when Bubble Tea fails to start, so a broken
-  terminal looks identical to a clean quit. Surface the error.
+- **L11. TUI errors became a silent logout — FIXED.** `runMenu()` returned
+  `"q"` when Bubble Tea failed, so a terminal that died mid-session looked
+  identical to the caller pressing quit — in the log and in the exit code.
+
+  - All three Bubble Tea entry points (`runMenu`, `runForm`,
+    `showInfoActions`) now go through one seam, `runTerminalProgram`, and report
+    failures to `recordTerminalError`, which keeps the first error and logs
+    `action=terminal_error`.
+  - `run()` turns that into a returned error (`terminal session ended
+    unexpectedly: …`) instead of printing the goodbye banner and exiting zero.
+    The login path is covered too: a cancelled login caused by a broken terminal
+    is distinguished from a caller choosing Cancel.
+  - `main` now writes fatal errors to **stderr** rather than stdout. Stdout is
+    the interactive terminal, which may itself be the thing that failed; writing
+    the explanation there was pointless in exactly the case that mattered.
+
+  Tests: menu, form and info failures are recorded and logged; a clean quit
+  records nothing; and `run()` returns the terminal error rather than reporting
+  a clean logout.
 
 ---
 

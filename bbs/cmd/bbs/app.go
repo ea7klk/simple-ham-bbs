@@ -192,10 +192,25 @@ func (a *app) reportBootstrapSysopState() {
 	a.logBBSAction("", "sysop_bootstrap_unclaimed", "configured=%d note=%q", len(a.cfg.sysops), "no account holds the sysop role; the first listed callsign to log in is granted it")
 }
 
+// terminalFailure turns a recorded terminal error into the error run() returns,
+// so main can report it and exit non-zero instead of pretending the caller hung
+// up.
+func (a *app) terminalFailure() error {
+	if a.terminalError == nil {
+		return nil
+	}
+	return fmt.Errorf("terminal session ended unexpectedly: %w", a.terminalError)
+}
+
 func (a *app) run() error {
 	callsign, profile, err := a.authenticate()
 	if err != nil {
 		if errors.Is(err, errLoginCancelled) {
+			// A cancelled login is a clean exit — unless the terminal itself
+			// failed, which is not the same thing.
+			if a.terminalError != nil {
+				return a.terminalFailure()
+			}
 			return nil
 		}
 		return err
@@ -247,6 +262,9 @@ func (a *app) run() error {
 				a.sysopMenu(callsign, lang)
 			}
 		case "q":
+			if a.terminalError != nil {
+				return a.terminalFailure()
+			}
 			a.logBBSAction(callsign, "logout", "")
 			fmt.Println(a.banner(lang) + a.t(lang, "goodbye"))
 			return nil

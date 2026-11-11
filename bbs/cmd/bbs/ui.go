@@ -673,14 +673,39 @@ func (m formModel) fieldLines(i int) int {
 	return 2
 }
 
+// runTerminalProgram is the single entry point to Bubble Tea, so tests can
+// exercise the failure path without a terminal.
+var runTerminalProgram = func(m tea.Model) (tea.Model, error) {
+	return newTerminalProgram(m).Run()
+}
+
+// recordTerminalError remembers the first terminal failure of the session and
+// logs it.
+//
+// Bubble Tea returns an error when the terminal disappears or its input cannot
+// be read. Callers used to swallow that and report a normal quit, so a broken
+// terminal was indistinguishable from a clean logout — in the logs and to the
+// caller. The error is now kept until the session ends, where run() turns it
+// into a non-zero exit with a message.
+func (a *app) recordTerminalError(err error) {
+	if err == nil {
+		return
+	}
+	if a.terminalError == nil {
+		a.terminalError = err
+	}
+	a.logBBSAction("", "terminal_error", "error=%q", err.Error())
+}
+
 func (a *app) runMenu(lang, title, header string, opts []option) string {
 	if a.runMenuHook != nil {
 		return a.runMenuHook(lang, title, header, opts)
 	}
 	clearScreen()
 	m := menuModel{app: a, lang: lang, title: title, header: header, options: opts}
-	model, err := newTerminalProgram(m).Run()
+	model, err := runTerminalProgram(m)
 	if err != nil {
+		a.recordTerminalError(err)
 		return "q"
 	}
 	return model.(menuModel).chosen
@@ -692,8 +717,9 @@ func (a *app) runForm(lang, title string, fields []formField, buttons []string) 
 	}
 	clearScreen()
 	m := newFormModel(a, lang, title, fields, buttons)
-	model, err := newTerminalProgram(m).Run()
+	model, err := runTerminalProgram(m)
 	if err != nil {
+		a.recordTerminalError(err)
 		return "cancel", nil, false
 	}
 	done := model.(formModel)
@@ -902,8 +928,9 @@ func (a *app) showInfoActions(lang, title string, rows [][]string, actions []opt
 		}
 	}
 	model := infoModel{app: a, lang: lang, title: title, lines: lines, actions: actions}
-	done, err := newTerminalProgram(model).Run()
+	done, err := runTerminalProgram(model)
 	if err != nil {
+		a.recordTerminalError(err)
 		return "q"
 	}
 	if chosen := done.(infoModel).chosen; chosen != "" {
