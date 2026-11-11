@@ -46,9 +46,9 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 		})
 		switch choice {
 		case "1":
-			a.showReceivedAPRS(callsign, profile, lang)
+			a.aprsReceivedSection(callsign, profile, lang)
 		case "2":
-			a.showSentAPRS(callsign, profile, lang)
+			a.aprsSentSection(callsign, profile, lang)
 		case "3":
 			a.sendAPRS(callsign, profile, lang)
 		case "4":
@@ -76,10 +76,37 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 	}
 }
 
-func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string) {
+// aprsReceivedSection offers the three sections of the received history, with
+// their counts, and opens the one chosen.
+func (a *app) aprsReceivedSection(callsign string, profile userProfile, lang string) {
+	if !a.requireAPRSEnabled(lang, a.t(lang, "aprs_received_messages"), profile) {
+		return
+	}
+	counts := countReceivedScopes(a.trimReceived(callsign))
+	scope, ok := a.aprsSectionMenu(lang, "aprs_received_messages", counts)
+	if !ok {
+		return
+	}
+	a.showReceivedAPRS(callsign, profile, lang, scope)
+}
+
+// aprsSentSection is the same for the sent history.
+func (a *app) aprsSentSection(callsign string, profile userProfile, lang string) {
+	if !a.requireAPRSEnabled(lang, a.t(lang, "aprs_sent_messages"), profile) {
+		return
+	}
+	counts := countSentScopes(a.trimSent(callsign))
+	scope, ok := a.aprsSectionMenu(lang, "aprs_sent_messages", counts)
+	if !ok {
+		return
+	}
+	a.showSentAPRS(callsign, profile, lang, scope)
+}
+
+func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string, scope aprsScope) {
 	for {
-		history := reverseReceived(a.trimReceived(callsign))
-		title := fmt.Sprintf("%d %s", len(history), a.t(lang, "aprs_received_messages"))
+		history := reverseReceived(filterReceivedByScope(a.trimReceived(callsign), scope))
+		title := fmt.Sprintf("%d %s (%s)", len(history), a.t(lang, "aprs_received_messages"), a.t(lang, scope.labelKey()))
 		if !profile.EnableAPRS {
 			a.showInfo(lang, title, [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return
@@ -305,9 +332,9 @@ func (a *app) sendAPRSBotCommand(callsign string, profile userProfile, lang, tit
 	}
 }
 
-func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
+func (a *app) showSentAPRS(callsign string, profile userProfile, lang string, scope aprsScope) {
 	for {
-		history := reverseSent(a.trimSent(callsign))
+		history := reverseSent(filterSentByScope(a.trimSent(callsign), scope))
 		if !profile.EnableAPRS {
 			a.showInfo(lang, a.t(lang, "aprs_sent_messages"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return
@@ -321,7 +348,7 @@ func (a *app) showSentAPRS(callsign string, profile userProfile, lang string) {
 			opts = append(opts, option{strconv.Itoa(i + 1), a.sentAPRSListLabel(item)})
 		}
 		opts = append(opts, option{"q", a.t(lang, "back_button")})
-		choice := a.runMenu(lang, a.t(lang, "aprs_sent_messages"), a.t(lang, "aprs_latest_sent"), opts)
+		choice := a.runMenu(lang, fmt.Sprintf("%d %s (%s)", len(history), a.t(lang, "aprs_sent_messages"), a.t(lang, scope.labelKey())), a.t(lang, "aprs_latest_sent"), opts)
 		if choice == "q" {
 			return
 		}

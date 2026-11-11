@@ -381,6 +381,7 @@ func TestAPRSDisplayTextRemovesTerminalControlsAndKeepsListWidth(t *testing.T) {
 func TestReceivedAPRSPageTitleIncludesTotal(t *testing.T) {
 	a := testApp(t)
 	a.text["en"]["aprs_received_messages"] = "Received APRS messages"
+	a.text["en"]["aprs_section_direct"] = "Other stations"
 	if _, err := a.addReceivedRecord("EA7KLK", receivedAPRS{From: "EA1ABC", To: "EA7KLK-0", Text: "hello", Raw: "raw"}); err != nil {
 		t.Fatal(err)
 	}
@@ -389,8 +390,8 @@ func TestReceivedAPRSPageTitleIncludesTotal(t *testing.T) {
 		title = gotTitle
 		return "q"
 	}
-	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en")
-	if title != "1 Received APRS messages" {
+	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en", aprsScopeDirect)
+	if title != "1 Received APRS messages (Other stations)" {
 		t.Fatalf("received APRS title = %q", title)
 	}
 }

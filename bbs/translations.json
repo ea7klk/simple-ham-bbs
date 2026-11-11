@@ -283,7 +283,14 @@
       "HELP           diese Liste",
       "Das Netz startet um 0000Z neu; du musst dich täglich neu einchecken.",
       "Alles, was länger als eine APRS-Nachricht ist, wird abgelehnt, nicht aufgeteilt."
-    ]
+    ],
+    "aprs_section_direct": "Andere Stationen",
+    "aprs_section_aprsph": "APRSPH-Netz",
+    "aprs_section_thursday": "#APRSThursday",
+    "aprs_section_prompt": "Welche Nachrichten?",
+    "aprs_section_direct_desc": "Nachrichten mit anderen Stationen.",
+    "aprs_section_aprsph_desc": "Verkehr mit dem APRSPH-Netz-Bot.",
+    "aprs_section_thursday_desc": "Gruppenserver-Verkehr von ANSRVR, den #APRSThursday nutzt."
   },
   "en": {
     "about_graphics": "Graphics: plain ANSI text, suitable for simple terminals.",
@@ -569,7 +576,14 @@
       "HELP           this list",
       "The net restarts at 0000Z; you must check in again each day.",
       "Anything longer than one APRS message is refused, not split."
-    ]
+    ],
+    "aprs_section_direct": "Other stations",
+    "aprs_section_aprsph": "APRSPH net",
+    "aprs_section_thursday": "#APRSThursday",
+    "aprs_section_prompt": "Which messages?",
+    "aprs_section_direct_desc": "Messages exchanged with other stations.",
+    "aprs_section_aprsph_desc": "Traffic with the APRSPH net bot.",
+    "aprs_section_thursday_desc": "Group-server traffic from ANSRVR, which #APRSThursday uses."
   },
   "es": {
     "about_graphics": "Gráficos: texto ANSI simple, apto para terminales sencillos.",
@@ -855,7 +869,14 @@
       "HELP           esta lista",
       "La red se reinicia a las 0000Z; hay que entrar de nuevo cada día.",
       "Lo que no cabe en un solo mensaje APRS se rechaza, no se divide."
-    ]
+    ],
+    "aprs_section_direct": "Otras estaciones",
+    "aprs_section_aprsph": "Red APRSPH",
+    "aprs_section_thursday": "#APRSThursday",
+    "aprs_section_prompt": "¿Qué mensajes?",
+    "aprs_section_direct_desc": "Mensajes intercambiados con otras estaciones.",
+    "aprs_section_aprsph_desc": "Tráfico con el bot de la red APRSPH.",
+    "aprs_section_thursday_desc": "Tráfico del servidor de grupos ANSRVR, que usa #APRSThursday."
   },
   "fr": {
     "about_graphics": "Graphismes : texte ANSI simple, adapté aux terminaux simples.",
@@ -1141,6 +1162,13 @@
       "HELP           cette liste",
       "Le réseau redémarre à 0000Z ; il faut se réenregistrer chaque jour.",
       "Ce qui dépasse un seul message APRS est refusé, pas découpé."
-    ]
+    ],
+    "aprs_section_direct": "Autres stations",
+    "aprs_section_aprsph": "Réseau APRSPH",
+    "aprs_section_thursday": "#APRSThursday",
+    "aprs_section_prompt": "Quels messages ?",
+    "aprs_section_direct_desc": "Messages échangés avec d'autres stations.",
+    "aprs_section_aprsph_desc": "Trafic avec le bot du réseau APRSPH.",
+    "aprs_section_thursday_desc": "Trafic du serveur de groupes ANSRVR, utilisé par #APRSThursday."
   }
 }

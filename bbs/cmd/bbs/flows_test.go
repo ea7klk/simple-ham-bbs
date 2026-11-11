@@ -450,8 +450,8 @@ func TestAPRSMenusAndRows(t *testing.T) {
 		t.Fatal("reverse history helpers failed")
 	}
 	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string { return "q" }
-	a.showSentAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en")
-	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en")
+	a.showSentAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en", aprsScopeDirect)
+	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en", aprsScopeDirect)
 	// Disabled accounts are refused by the submenu entry point. It opens with a
 	// menu, so give it one that quits rather than reusing the exhausted queue.
 	a.runMenuHook = func(lang, title, header string, opts []option) string { return "q" }
@@ -604,7 +604,7 @@ func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 	a.runMenuHook = func(lang, title, header string, opts []option) string { return "1" }
 	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string { return "d" }
 	a.confirmDeleteHook = func(lang, prompt string) bool { return true }
-	a.showSentAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en")
+	a.showSentAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en", aprsScopeDirect)
 	if len(sentRows) == 0 || len(a.loadSentHistory("EA7KLK")) >= len(sentRows) {
 		t.Fatalf("showSentAPRS delete did not remove a row")
 	}
@@ -627,7 +627,7 @@ func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 		receivedMenus = receivedMenus[1:]
 		return next
 	}
-	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en")
+	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: true}, "en", aprsScopeDirect)
 
 	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string { return "q" }
 	a.joinAPRSThursday("EA7KLK", userProfile{EnableAPRS: true}, "en")
