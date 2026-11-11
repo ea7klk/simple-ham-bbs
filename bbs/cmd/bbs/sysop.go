@@ -57,16 +57,24 @@ func (a *app) listUsers(current, lang string, users map[string]userProfile) {
 	}
 }
 
+// Column widths for the sysop user list. registeredWidth is one wider than the
+// date it holds so the longest translated header ("Registriert") fits.
+const (
+	callsignWidth   = 10
+	registeredWidth = 11
+	lastSeenWidth   = 20
+	statusWidth     = 10
+	roleWidth       = 8
+)
+
 func (a *app) chooseUser(lang string, users map[string]userProfile, current string) (string, bool) {
 	opts := []option{}
 	targets := []string{}
 	i := 1
 	keys := sortedKeys(users)
-	const callsignWidth = 10
-	const lastSeenWidth = 20
-	const statusWidth = 10
-	const roleWidth = 8
-	nameWidth := panelContentWidth - 7 - callsignWidth - lastSeenWidth - statusWidth - roleWidth - 4
+	// One space follows each of the six columns; the -7 also covers the menu's
+	// option prefix.
+	nameWidth := panelContentWidth - 7 - callsignWidth - registeredWidth - lastSeenWidth - statusWidth - roleWidth - 5
 	if nameWidth < 12 {
 		nameWidth = 12
 	}
@@ -83,13 +91,13 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 		if p.Disabled {
 			status = a.t(lang, "disabled")
 		}
-		row := userListRow(key, p.LastSeen, status, role, p.FullName, nameWidth)
+		row := userListRow(key, p.Registered, p.LastSeen, status, role, p.FullName, nameWidth)
 		opts = append(opts, option{strconv.Itoa(i), row})
 		targets = append(targets, key)
 		i++
 	}
 	opts = append(opts, option{"q", a.t(lang, "menu_quit")})
-	header := userListRow(a.t(lang, "target_callsign"), a.t(lang, "last_connection"), a.t(lang, "account_status"), a.t(lang, "role"), a.t(lang, "full_name"), nameWidth)
+	header := userListRow(a.t(lang, "target_callsign"), a.t(lang, "date_registered"), a.t(lang, "last_connection"), a.t(lang, "account_status"), a.t(lang, "role"), a.t(lang, "full_name"), nameWidth)
 	choice := a.runMenu(lang, a.t(lang, "target_callsign"), header, opts)
 	if choice == "q" {
 		return "", false
@@ -101,14 +109,18 @@ func (a *app) chooseUser(lang string, users map[string]userProfile, current stri
 	return targets[idx-1], true
 }
 
-func userListRow(callsign, lastSeen, status, role, fullName string, nameWidth int) string {
+func userListRow(callsign, registered, lastSeen, status, role, fullName string, nameWidth int) string {
+	if registered == "" {
+		registered = "-"
+	}
 	if lastSeen == "" {
 		lastSeen = "-"
 	}
-	return paddedCell(callsign, 10) + " " +
-		paddedCell(lastSeen, 20) + " " +
-		paddedCell(status, 10) + " " +
-		paddedCell(role, 8) + " " +
+	return paddedCell(callsign, callsignWidth) + " " +
+		paddedCell(shortDate(registered), registeredWidth) + " " +
+		paddedCell(lastSeen, lastSeenWidth) + " " +
+		paddedCell(status, statusWidth) + " " +
+		paddedCell(role, roleWidth) + " " +
 		truncateText(fullName, nameWidth)
 }
 
@@ -183,7 +195,11 @@ func userDetailRows(a *app, lang, callsign string, profile userProfile, isSysop 
 	if profile.Disabled {
 		status = a.t(lang, "disabled")
 	}
-	rows := [][]string{{a.t(lang, "target_callsign"), callsign}, {a.t(lang, "account_status"), status}, {a.t(lang, "sysop"), role}}
+	registered := profile.Registered
+	if registered == "" {
+		registered = "-"
+	}
+	rows := [][]string{{a.t(lang, "target_callsign"), callsign}, {a.t(lang, "date_registered"), registered}, {a.t(lang, "account_status"), status}, {a.t(lang, "sysop"), role}}
 	rows = append(rows, profileRows(a, lang, profile)...)
 	return rows
 }

@@ -130,6 +130,11 @@ func (a *app) register(callsign string, profile userProfile, forcePassword bool)
 	if profile.FirstSeen == "" {
 		profile.FirstSeen = now()
 	}
+	if profile.Registered == "" {
+		// An account created before this field existed takes its registration
+		// date from the first-seen stamp, which was set at creation too.
+		profile.Registered = profile.FirstSeen
+	}
 	profile.IsSysop = profile.IsSysop || a.isBootstrapSysop(callsign)
 	for {
 		fields := a.profileFields(profile, true, forcePassword || profile.PasswordHash == "")

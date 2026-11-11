@@ -11,6 +11,16 @@ func now() string {
 	return time.Now().UTC().Format("2006-01-02 15:04 UTC")
 }
 
+// shortDate returns the date part of a timestamp produced by now(), so a table
+// column can carry a date without a 20-character timestamp. Values that are not
+// in that shape are returned unchanged.
+func shortDate(stamp string) string {
+	if len(stamp) >= 10 && stamp[4] == '-' && stamp[7] == '-' {
+		return stamp[:10]
+	}
+	return stamp
+}
+
 func normalizeCallsign(callsign string) string {
 	return strings.ToUpper(strings.TrimSpace(callsign))
 }

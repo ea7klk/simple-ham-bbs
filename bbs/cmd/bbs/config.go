@@ -97,6 +97,9 @@ type userProfile struct {
 	Disabled     bool   `json:"disabled,omitempty"`
 	FirstSeen    string `json:"first_seen,omitempty"`
 	LastSeen     string `json:"last_seen,omitempty"`
+	// Registered is when the account was created. It is written once and never
+	// changes, unlike FirstSeen/LastSeen which track presence.
+	Registered string `json:"registered,omitempty"`
 }
 
 type bulletin struct {

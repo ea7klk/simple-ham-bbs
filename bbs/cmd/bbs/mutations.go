@@ -52,6 +52,7 @@ func saveUserRow(db *gorm.DB, callsign string, profile userProfile) error {
 		Disabled:     profile.Disabled,
 		FirstSeen:    profile.FirstSeen,
 		LastSeen:     profile.LastSeen,
+		Registered:   profile.Registered,
 	}
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "callsign"}},

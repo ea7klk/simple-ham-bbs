@@ -45,6 +45,7 @@ func profileFromRow(row dbUser) userProfile {
 		Disabled:     row.Disabled,
 		FirstSeen:    row.FirstSeen,
 		LastSeen:     row.LastSeen,
+		Registered:   row.Registered,
 	}
 }
 

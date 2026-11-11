@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func installBasicText(a *app) {
@@ -343,8 +345,14 @@ func TestBoardAndSysopFlows(t *testing.T) {
 	if len(fields) != 8 {
 		t.Fatalf("userDetailFields=%#v", fields)
 	}
-	if row := userListRow("EA1ABC", "", "Enabled", "User", strings.Repeat("Name ", 20), 20); len([]rune(row)) > 80 {
-		t.Fatalf("userListRow too long: %q", row)
+	name := strings.Repeat("Name ", 20)
+	row := userListRow("EA1ABC", "2026-11-11 09:00 UTC", "", "Enabled", "User", name, 20)
+	wantRowWidth := callsignWidth + registeredWidth + lastSeenWidth + statusWidth + roleWidth + 20 + 5
+	if got := lipgloss.Width(row); got != wantRowWidth {
+		t.Fatalf("userListRow width = %d, want %d: %q", got, wantRowWidth, row)
+	}
+	if !strings.HasSuffix(row, truncateText(name, 20)) {
+		t.Fatalf("name cell not clipped to its width: %q", row)
 	}
 	if paddedCell("abcdef", 3) != "abc" || len(paddedCell("a", 3)) != 3 {
 		t.Fatal("paddedCell failed")

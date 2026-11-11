@@ -19,6 +19,7 @@ type dbUser struct {
 	Disabled     bool
 	FirstSeen    string
 	LastSeen     string
+	Registered   string
 }
 
 type dbBulletin struct {
@@ -104,7 +105,20 @@ func openDatabase(path string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAuthFailure{}, &dbRegistration{}); err != nil {
 		return nil, err
 	}
+	if err := backfillRegistered(db); err != nil {
+		return nil, err
+	}
 	return db, nil
+}
+
+// backfillRegistered gives accounts created before the column existed a
+// registration date taken from their first-seen stamp, which was written at
+// creation. It is idempotent: after the first run the WHERE clause matches
+// nothing.
+func backfillRegistered(db *gorm.DB) error {
+	return db.Model(&dbUser{}).
+		Where("(registered IS NULL OR registered = '') AND first_seen IS NOT NULL AND first_seen <> ''").
+		UpdateColumn("registered", gorm.Expr("first_seen")).Error
 }
 
 // seedDefaultData inserts the starter bulletins and board. Every SSH connection

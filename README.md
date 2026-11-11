@@ -106,6 +106,12 @@ Sysop users can administer accounts from the sysop menu:
 - Edit or delete individual messages from message boards.
 - Sysops cannot delete or disable their own account.
 - The BBS prevents removal of the last active sysop.
+- The user list shows each account's registration date alongside its last
+  connection, status and role; the account detail screen repeats it.
+
+The registration date is recorded when the account is created and never
+changes. Accounts that predate the field take their date from the first-seen
+timestamp written at creation, backfilled automatically on startup.
 
 Bootstrap a sysop from `.env` with a comma-separated callsign list:
 
