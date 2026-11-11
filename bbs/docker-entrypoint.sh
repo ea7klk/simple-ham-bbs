@@ -84,8 +84,31 @@ migrate_schema() {
   # the write lock, so it must not run in every SSH session. Doing it here, before
   # sshd starts accepting connections, means a session never has to wait for the
   # supervisor and never races it.
-  if ! /usr/local/bin/bbs_app migrate; then
+  #
+  # It runs as `bbs`, the account SSH sessions run as. This entrypoint is root, so
+  # a plain invocation would create the database and its WAL as root, and every
+  # session — which writes last-seen on login — would then fail with
+  # "attempt to write a readonly database". Running as the session user means the
+  # files are created with the right owner in the first place; nothing is chowned.
+  #
+  # Ownership is deliberately not changed here: the database volume is shared
+  # with the web BBS, so who owns these files is an operator decision that this
+  # container must not make behind their back.
+  if ! su bbs -c "/usr/local/bin/bbs_app migrate"; then
     echo "$(date -u '+%Y-%m-%d %H:%M UTC') schema migration failed; refusing to start sshd." >&2
+    exit 1
+  fi
+
+  # A database created by an earlier version of this image (or by the operator as
+  # root) can be present but unwritable by `bbs`. That does not fail the
+  # migration — it only reads when the schema is current — so it is checked
+  # explicitly rather than surfacing as a failed login.
+  local db_file="${BBS_DB_FILE:-$data_dir/bbs.sqlite}"
+  if [ -e "$db_file" ] && ! su bbs -c "test -w '$db_file'"; then
+    echo "$(date -u '+%Y-%m-%d %H:%M UTC') $db_file is not writable by the bbs user." >&2
+    echo "SSH sessions could not store anything, so sshd was not started. The file is" >&2
+    echo "shared with the web BBS; make it writable for bbs (chown, a shared group" >&2
+    echo "with 0660, or an ACL) as suits your deployment, then restart the container." >&2
     exit 1
   fi
 }
