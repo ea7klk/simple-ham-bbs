@@ -871,11 +871,50 @@ thread.
   Tests: a child outliving its deadline is killed and the call returns promptly,
   normal and failing exits are reported correctly, a missing binary surfaces the
   start error, and the ceiling exceeds the receiver's self-restart interval.
-- **L10. Triple restart layering.** The entrypoint loops the supervisor
-  (`docker-entrypoint.sh:79-87`), the supervisor loops the receiver, and the
-  receiver loops its own reconnect with `restartAt`. Three independent retry
-  loops with different delays make failure behaviour hard to reason about and
-  hard to observe. Collapse to one supervisor with backoff.
+- **L10. Triple restart layering — RECOMMENDATION RECORDED (not implemented).**
+  Three independent retry loops sit on top of each other, each with its own
+  delay:
+
+  1. `docker-entrypoint.sh` loops `bbs_app aprs-supervisor` with a fixed 10 s
+     sleep, in a background shell, then `exec`s sshd.
+  2. `watchAPRSReceiver()` loops `bbs_app aprs-receiver` with a fixed 10 s
+     sleep.
+  3. `runAPRSReceiver()` reconnects internally, and exits deliberately every
+     hour so the supervisor restarts it and the APRS-IS session is refreshed.
+
+  Failure behaviour is therefore hard to observe: a receiver that crashes every
+  30 seconds produces a 30-second restart loop, a silent shell loop that never
+  gives up, and no single place that says how many times something has failed.
+  Nothing backs off, so a persistent failure becomes a steady 10-second retry
+  churn, and the hourly exit means a healthy process is killed and recreated
+  once an hour for no reason other than to recycle a socket.
+
+  **Recommended fix: one supervisor, one backoff, and the container runtime as
+  the outermost layer.**
+
+  - Make `bbs_app aprs-supervisor` the container's main process, started under
+    `tini` as PID 1. It starts sshd and the receiver as children and waits on
+    both. Any fatal error returns from `main`, the container exits non-zero, and
+    the runtime restarts it — `restartPolicy: Always` on k8s, `restart:
+    unless-stopped` in compose. That is the outermost loop and it already
+    exists; the shell `while true` in the entrypoint should be deleted.
+  - The supervisor supervises the receiver with **exponential backoff and
+    jitter** (`1s, 2s, 4s … capped at 60s`), resetting after a run that lasted
+    longer than, say, a minute. That gives one place to log attempts, delays and
+    give-up thresholds.
+  - Drop the receiver's hourly exit. The reason for it — refreshing the APRS-IS
+    session — is better served by closing and re-opening the connection inside
+    `runAPRSReceiver()`'s existing loop, which avoids a process restart, keeps
+    the multipart buffers, and removes the third loop entirely.
+  - Keep sshd's lifetime tied to the supervisor's, so a supervisor crash is a
+    container restart rather than a container that serves SSH with a dead APRS
+    path.
+
+  This is recorded rather than implemented because it restructures process
+  ownership in the image (entrypoint, supervisor, sshd, receiver) and deserves
+  its own change with a live test, not a tail-end addition to a review sweep.
+  L9's deadline makes the current arrangement survivable in the meantime: the
+  watchdog can no longer block forever.
 - **L11. TUI errors become a silent logout.** `runMenu()`
   (`ui.go:672-683`) returns `"q"` when Bubble Tea fails to start, so a broken
   terminal looks identical to a clean quit. Surface the error.
