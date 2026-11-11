@@ -1067,7 +1067,9 @@ claim is honest.
    login, APRS inbound)~~ — **done** (see M1 and M2).
 7. ~~**M3** — CI runner and permission hardening~~ — **done** (see M3);
    ~~**M4** — WireGuard capabilities and compose tags~~ — **accepted** (see M4).
-8. ~~**M6, M8**~~ — **done** (see their sections); **L1–L11** — hygiene.
+8. ~~**M6, M8**~~ — **done** (see their sections); ~~**L1–L11**~~ — **closed**:
+   L2, L4, L7, L8, L9 and L11 fixed; L1, L3, L5 and L6 accepted with reasons;
+   L10's recommended fix recorded for its own change.
 
 ## Limits
 

@@ -93,6 +93,8 @@ The SSH account is only the transport. The BBS has its own callsign-based accoun
 - Interactive terminals can use cursor keys and Enter for menus; dialog-style forms use Tab to move between fields/buttons, direct typing to edit, the Save/Cancel buttons, and F2 as a save shortcut. Long message text fields word-wrap, and Up/Down scroll within the text field instead of moving form focus. Scripted/non-interactive sessions can still type menu numbers and field values.
 - Menu translations live in `bbs/translations.json`, separate from the main BBS application code.
 - Five failed BBS passwords from one address within fifteen minutes lock that address out for fifteen minutes. The counter is shared by all sessions, so reconnecting does not reset it.
+- New accounts are limited to five per hour from one address. Completing an existing profile is not counted.
+- The banner shows `[Sysop]` next to the callsign when the session has the sysop role, on every screen.
 
 Sysop users can administer accounts from the sysop menu:
 
@@ -124,6 +126,12 @@ Two consequences worth knowing before you expose the port:
 - Once bootstrapped, a sysop is an ordinary sysop: they can be demoted from the
   sysop menu like anyone else, subject to the last-active-sysop guard. Remove
   the entry from `BBS_SYSOPS` afterwards if you do not want it lying around.
+
+Entries are validated at startup: an invalid callsign in `BBS_SYSOPS` stops the
+BBS with an error naming it, rather than being silently ignored. If no sysop
+exists yet, the startup log says whether the bootstrap is still unclaimed
+(`sysop_bootstrap_unclaimed`) or waiting for a login
+(`sysop_bootstrap_pending`).
 
 There is no reliable way to verify that a caller owns the callsign they type.
 Anyone can claim any callsign that does not yet have an account, so treat BBS
