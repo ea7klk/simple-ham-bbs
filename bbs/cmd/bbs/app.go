@@ -157,11 +157,27 @@ func (a *app) seedData() error {
 	if err := a.seedDefaultData(); err != nil {
 		return err
 	}
+	a.reportMailState()
 	a.reportBootstrapSysopState()
 	if err := a.applyEmailChanges(time.Now()); err != nil {
 		a.logBBSAction("", "email_change_apply_failed", "error=%q", err.Error())
 	}
 	return a.normalizeReceivedAPRSStore()
+}
+
+// reportMailState records, once per process, whether outbound mail is usable
+// and why not when it is not.
+//
+// A deployment can declare every SMTP setting and still be unable to send — the
+// password may still be a placeholder, or the URL may be malformed. Saying so at
+// startup is the difference between "activation is silently skipped" and an
+// operator who knows to finish the configuration.
+func (a *app) reportMailState() {
+	if problem := a.mail.Problem(); problem != "" {
+		a.logBBSAction("", "mail_disabled", "reason=%q", problem)
+		return
+	}
+	a.logBBSAction("", "mail_enabled", "host=%q from=%q security=%q", a.mail.cfg.host, a.mail.cfg.from, a.mail.cfg.security)
 }
 
 // reportBootstrapSysopState records whether the configured bootstrap sysops are

@@ -268,10 +268,46 @@ BBS_SMTP_FROM_NAME=HAMNET Radio BBS
 BBS_WEB_BASE_URL=https://bbs.ea7lk.es
 ```
 
-Mail is enabled only when `BBS_SMTP_HOST` and `BBS_SMTP_FROM` are both set. With
-mail disabled the BBS stays usable: activation is skipped (and logged as
-`activation_skipped`), password reset reports that email is not configured, and
-an email change is applied immediately with a log line saying it was unverified.
+Mail is enabled only when the configuration is complete and genuine: the host
+and sender must be set, the port and security mode must be valid, `BBS_WEB_BASE_URL`
+must be an absolute URL, and — when a username is given — the password must not
+be a placeholder. A half-filled configuration is refused rather than
+half-enabled, because mail that looks configured and fails every send is worse
+than mail that is off: registration would be blocked at activation with no code
+ever arriving.
+
+Startup logs the decision either way: `mail_enabled` with the host and sender, or
+`mail_disabled` with the reason (`BBS_SMTP_PASSWORD is empty or still a
+placeholder`, and so on). With mail disabled the BBS stays usable: activation is
+skipped (and logged as `activation_skipped`), password reset reports that email
+is not configured, and an email change is applied immediately with a log line
+saying it was unverified.
+
+### Enabling mail on the cluster
+
+The deployment keeps the non-secret settings in GitOps and the password outside
+it, so a placeholder can be committed without weakening anything:
+
+- `fleet/managed-apps.yaml` in `spainip/infra` defines a `bbs-smtp` Secret with
+  the host, port, security, username, sender and web URL, and a placeholder
+  `BBS_SMTP_PASSWORD`.
+- The Deployment reads `bbs-smtp` first and `bbs-env` second, so a
+  `BBS_SMTP_PASSWORD` added to the existing `bbs-env` Secret overrides the
+  placeholder. `bbs-env` is not managed by Fleet, so the real password is never
+  committed and never reverted by drift correction.
+
+To turn mail on, set the real Mailcow password on the cluster:
+
+```sh
+kubectl -n ham-bbs patch secret bbs-env --type merge \
+  -p '{"stringData":{"BBS_SMTP_PASSWORD":"<mailcow-password>"}}'
+kubectl -n ham-bbs rollout restart deploy/bbs
+kubectl -n ham-bbs logs deploy/bbs --tail=20 | grep mail_
+```
+
+`mail_enabled` means it took. `mail_disabled` prints the reason. To turn mail
+off again, remove the key (`patch` with `"BBS_SMTP_PASSWORD":null`) or blank it;
+either leaves the app with no usable password and it stays off.
 
 Messages are sent in the user's language (English, German, Spanish, French) and
 contain a plain-text link, never an HTML body. Sending is synchronous with a 20 s

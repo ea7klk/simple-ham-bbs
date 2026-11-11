@@ -967,6 +967,20 @@ upgrade. The cost is that the *unconfigured* state silently provides weaker
 assurance than the configured one, which is why each case writes a distinct log
 line and `README.md` states it.
 
+**"Configured" is a decision with a reason attached.** `mailer.Problem()`
+(`mail.go`) validates the whole configuration — host, sender, an `@` in the
+sender, port range, the TLS mode, an absolute `BBS_WEB_BASE_URL`, and, when a
+username is set, that the password is not a placeholder — and `Enabled()` is
+`Problem() == ""`. This exists because the deployment is intended to ship with a
+placeholder password in GitOps: without the guard, declaring a host and a
+placeholder password would mark mail "enabled", and every registration would be
+blocked at activation while every send failed. The placeholder test is
+deliberately narrow (exact words like `changeme`, `__FILL_ME__`-style wrappers,
+and markers such as `replace_with`), so a real password containing an ordinary
+word is not rejected. Startup records `mail_enabled` or `mail_disabled` with the
+reason, which is how an operator tells an unfinished configuration from a
+deliberate one.
+
 **Migration hazard, found in production.** The `activated` column is added by
 `AutoMigrate`, which leaves existing rows **NULL**, and the first version of the
 backfill used `WHERE activated = false`. In SQL that does not match NULL, so the

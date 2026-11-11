@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -673,5 +674,123 @@ func TestMailTextsCoverEveryUILanguage(t *testing.T) {
 	// An unknown language falls back rather than sending an empty message.
 	if mailText("eo").activation == "" {
 		t.Fatal("unknown language produced empty mail text")
+	}
+}
+
+// A declared-but-unfinished configuration must not count as enabled: mail that
+// looks configured and fails every send is worse than mail that is off, because
+// registrations would be blocked at activation.
+func TestMailProblemRefusesHalfFilledConfiguration(t *testing.T) {
+	base := mailConfig{
+		host:       "mail.ea7lk.es",
+		port:       587,
+		username:   "bbs@ea7lk.es",
+		from:       "bbs@ea7lk.es",
+		security:   "starttls",
+		webBaseURL: "https://bbs.ea7lk.es",
+	}
+
+	withPassword := func(pw string) *mailer {
+		cfg := base
+		cfg.password = pw
+		return &mailer{cfg: cfg}
+	}
+
+	if p := withPassword("real-mailcow-password").Problem(); p != "" {
+		t.Fatalf("a complete configuration reported a problem: %q", p)
+	}
+	if !withPassword("real-mailcow-password").Enabled() {
+		t.Fatal("a complete configuration was not enabled")
+	}
+
+	placeholders := []string{
+		"", "   ", "__SET_ME__", "__REPLACE_WITH_MAILCOW_PASSWORD__",
+		"<your-password>", "{{ password }}", "changeme", "change-this-smtp-password",
+		"TODO", "placeholder", "insert_password_here", "REPLACE_WITH_PASSWORD",
+	}
+	for _, pw := range placeholders {
+		m := withPassword(pw)
+		if m.Enabled() {
+			t.Fatalf("placeholder password %q was treated as enabled", pw)
+		}
+		if !strings.Contains(m.Problem(), "placeholder") && !strings.Contains(m.Problem(), "empty") {
+			t.Fatalf("placeholder %q gave a confusing reason: %q", pw, m.Problem())
+		}
+	}
+
+	// A real password that merely contains an ordinary word is not a placeholder.
+	for _, pw := range []string{"correct-horse-battery-staple", "S3cr3t!pass", "changeling9"} {
+		if isPlaceholderValue(pw) {
+			t.Fatalf("real password %q was rejected as a placeholder", pw)
+		}
+	}
+}
+
+func TestMailProblemCoversEachSetting(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*mailConfig)
+		want   string
+	}{
+		{"no host", func(c *mailConfig) { c.host = "" }, "BBS_SMTP_HOST"},
+		{"no from", func(c *mailConfig) { c.from = "" }, "BBS_SMTP_FROM"},
+		{"from not an address", func(c *mailConfig) { c.from = "bbs" }, "BBS_SMTP_FROM"},
+		{"bad port", func(c *mailConfig) { c.port = 0 }, "BBS_SMTP_PORT"},
+		{"bad security", func(c *mailConfig) { c.security = "ssl" }, "BBS_SMTP_SECURITY"},
+		{"relative url", func(c *mailConfig) { c.webBaseURL = "bbs.ea7lk.es" }, "BBS_WEB_BASE_URL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := mailConfig{
+				host: "mail.ea7lk.es", port: 587, username: "bbs@ea7lk.es",
+				password: "real", from: "bbs@ea7lk.es", security: "starttls",
+				webBaseURL: "https://bbs.ea7lk.es",
+			}
+			tc.mutate(&cfg)
+			m := &mailer{cfg: cfg}
+			if m.Enabled() {
+				t.Fatalf("%s was treated as enabled", tc.name)
+			}
+			if !strings.Contains(m.Problem(), tc.want) {
+				t.Fatalf("reason for %s = %q, want it to mention %s", tc.name, m.Problem(), tc.want)
+			}
+		})
+	}
+}
+
+// A relay that needs no authentication is valid with no username and no password.
+func TestMailWithoutAuthenticationIsEnabled(t *testing.T) {
+	m := &mailer{cfg: mailConfig{
+		host: "relay.local", port: 25, from: "bbs@example.org", security: "none",
+	}}
+	if !m.Enabled() {
+		t.Fatalf("unauthenticated relay reported a problem: %q", m.Problem())
+	}
+}
+
+// The startup line names the reason, so an operator can tell an unfinished
+// configuration from a deliberate one.
+func TestReportMailStateLogsTheReason(t *testing.T) {
+	a := testApp(t)
+	a.cfg.bbsLogFile = t.TempDir() + "/bbs.log"
+	a.mail = &mailer{cfg: mailConfig{
+		host: "mail.ea7lk.es", port: 587, username: "bbs@ea7lk.es",
+		password: "__SET_ME__", from: "bbs@ea7lk.es", security: "starttls",
+		webBaseURL: "https://bbs.ea7lk.es",
+	}}
+	a.reportMailState()
+	body, err := os.ReadFile(a.cfg.bbsLogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "mail_disabled") || !strings.Contains(string(body), "placeholder") {
+		t.Fatalf("mail state not logged with a reason: %q", body)
+	}
+
+	a.mail.cfg.password = "real"
+	a.reportMailState()
+	body, _ = os.ReadFile(a.cfg.bbsLogFile)
+	if !strings.Contains(string(body), "mail_enabled") {
+		t.Fatalf("enabled state not logged: %q", body)
 	}
 }

@@ -69,18 +69,93 @@ func newMailerFromEnv() *mailer {
 		password:   os.Getenv("BBS_SMTP_PASSWORD"),
 		from:       strings.TrimSpace(env("BBS_SMTP_FROM", os.Getenv("BBS_SMTP_USERNAME"))),
 		fromName:   env("BBS_SMTP_FROM_NAME", "HAMNET Radio BBS"),
-		security:   strings.ToLower(env("BBS_SMTP_SECURITY", "starttls")),
+		security:   strings.ToLower(strings.TrimSpace(env("BBS_SMTP_SECURITY", "starttls"))),
 		webBaseURL: strings.TrimRight(env("BBS_WEB_BASE_URL", "https://bbs.ea7lk.es"), "/"),
 	}, now: time.Now}
 	m.send = m.smtpSend
 	return m
 }
 
-// Enabled reports whether outbound mail is configured. Without a host there is
-// nowhere to send to, so the account flows that depend on mail degrade to their
+// Problem explains why mail cannot be used, or returns "" when it can.
+//
+// It exists so "mail is configured" is a decision with a reason attached, not a
+// guess. A deployment that declares an SMTP host but leaves the password at a
+// placeholder would otherwise mark itself enabled and then fail every send,
+// which is worse than not enabling mail at all: registrations would be blocked
+// at activation with no code ever arriving.
+func (m *mailer) Problem() string {
+	if m == nil {
+		return "mailer not initialised"
+	}
+	if strings.TrimSpace(m.cfg.host) == "" {
+		return "BBS_SMTP_HOST is not set"
+	}
+	if strings.TrimSpace(m.cfg.from) == "" {
+		return "BBS_SMTP_FROM is not set"
+	}
+	if !strings.Contains(m.cfg.from, "@") {
+		return "BBS_SMTP_FROM is not an email address"
+	}
+	if m.cfg.port <= 0 || m.cfg.port > 65535 {
+		return "BBS_SMTP_PORT is not a valid port"
+	}
+	switch m.cfg.security {
+	case "starttls", "tls", "none":
+	default:
+		return "BBS_SMTP_SECURITY must be starttls, tls or none"
+	}
+	// Authentication is optional (a local relay may not need it), but when a
+	// username is given the password must be real.
+	if strings.TrimSpace(m.cfg.username) != "" && isPlaceholderValue(m.cfg.password) {
+		return "BBS_SMTP_PASSWORD is empty or still a placeholder"
+	}
+	if url := strings.TrimSpace(m.cfg.webBaseURL); url != "" {
+		if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
+			return "BBS_WEB_BASE_URL must be an absolute http(s) URL"
+		}
+	}
+	return ""
+}
+
+// Enabled reports whether outbound mail is usable. Without a usable
+// configuration the account flows that depend on mail degrade to their
 // pre-existing behaviour and say so instead of pretending to have sent a link.
 func (m *mailer) Enabled() bool {
-	return m != nil && m.cfg.host != "" && m.cfg.from != ""
+	return m.Problem() == ""
+}
+
+// isPlaceholderValue reports whether a configured value is obviously not a real
+// credential, so a half-filled deployment is refused rather than half-working.
+//
+// The test is deliberately narrow: it matches markers a person writes when
+// leaving a value to be filled in later, not substrings that a real password
+// might contain.
+func isPlaceholderValue(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return true
+	}
+	lower := strings.ToLower(v)
+	for _, exact := range []string{"changeme", "change-me", "change_me", "password", "placeholder", "secret", "todo", "xxx"} {
+		if lower == exact {
+			return true
+		}
+	}
+	if strings.HasPrefix(lower, "change-this") || strings.HasPrefix(lower, "change_this") {
+		return true
+	}
+	// __FILL_ME__, <your-password>, {{ password }} and similar templates.
+	if (strings.HasPrefix(lower, "__") && strings.HasSuffix(lower, "__")) ||
+		(strings.HasPrefix(lower, "<") && strings.HasSuffix(lower, ">")) ||
+		(strings.HasPrefix(lower, "{{") && strings.HasSuffix(lower, "}}")) {
+		return true
+	}
+	for _, marker := range []string{"fill_me", "fillme", "replace_with", "replace-with", "set_me", "setme", "insert_password"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *mailer) WebURL(path string) string {
