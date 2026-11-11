@@ -10,6 +10,11 @@ the real code against a generated database at the stated size. The harness was
 temporary and is not in the repository; the method is described at the end so the
 numbers can be reproduced.
 
+> **Status.** Changes 1–3 of the recommendations are implemented; the measured
+> figures below describe the code as it was assessed, before those changes, and
+> are kept as the record that justified them. Change 4 is deliberately deferred.
+> See [What to change](#what-to-change-in-order-of-value).
+
 ## Verdict
 
 Every row below is a measured point, not an interpolation.
@@ -132,7 +137,12 @@ This is the cheapest significant fix in the list.
 
 ### Where the time goes per connection
 
-Opening an SSH connection runs, in order, in a fresh process:
+Opening an SSH connection runs, in order, in a fresh process. **This is the
+before picture:** changes 1–3 removed every row of it except the login itself, so
+`openDatabase` now only opens the file and a session waits on a single indexed
+read for the schema instead of migrating it.
+
+
 
 | Step | Cost at 10 000 users | Writes? |
 | --- | --- | --- |
@@ -201,16 +211,38 @@ unusable at 50 000.
 
 ## What to change, in order of value
 
-| # | Change | Removes | Effort |
-| --- | --- | --- | --- |
-| 1 | Move `AutoMigrate`, `seedData`, `normalizeReceivedAPRSStore` out of the connection path into the supervisor (or a one-shot `bbs migrate`) | ~4.4 s per login at 10 000 users, and a write lock acquisition per connection | Small |
-| 2 | Replace `loadUsers` with a targeted `loadUser(callsign)` in `storeReceivedAPRS`, `aprsRecipientEnabled` and `aprsRecipientExists` (all in `aprs_receiver.go`) | 155 ms → sub-millisecond per inbound packet; removes the 6 packets/s ceiling | Small |
-| 3 | Index the email column with `COLLATE NOCASE` and query by it | 132 ms → log n for password reset by email | Small |
-| 4 | Make the sysop user list a paginated search instead of one option per user | O(n) menu construction, and the 10 000-entry menu | Medium |
+| # | Change | Removes | Effort | Status |
+| --- | --- | --- | --- | --- |
+| 1 | Move `AutoMigrate`, `seedData`, `normalizeReceivedAPRSStore` out of the connection path into the supervisor (or a one-shot `bbs migrate`) | ~4.4 s per login at 10 000 users, and a write lock acquisition per connection | Small | **Done** |
+| 2 | Replace `loadUsers` with a targeted `loadUser(callsign)` in `storeReceivedAPRS`, `aprsRecipientEnabled` and `aprsRecipientExists` (all in `aprs_receiver.go`) | 155 ms → sub-millisecond per inbound packet; removes the 6 packets/s ceiling | Small | **Done** |
+| 3 | Index the email column with `COLLATE NOCASE` and query by it | 132 ms → log n for password reset by email | Small | **Done** |
+| 4 | Make the sysop user list a paginated search instead of one option per user | O(n) menu construction, and the 10 000-entry menu | Medium | **Later implementation** |
 
 After 1–3, measured expectations: login prompt well under 200 ms, APRS receive
 independent of user count, password reset by email constant-time. Storage and
 write concurrency already have ample headroom at 10 000.
+
+### Change 4: deliberately deferred
+
+The sysop user list is the last O(n) path, and it is left as a later
+implementation on purpose. It is the only remaining one, and it is bounded by how
+often a sysop opens the list rather than by traffic: a slow menu is a sysop
+waiting a second, where changes 1–3 were paid on every login and every inbound
+packet. Nothing else in the code depends on it.
+
+When it is picked up, the shape is a filtered query with a page size rather than
+one menu option per user:
+
+- a callsign prefix search over the primary key, plus a page of N rows, instead
+  of building an option per account;
+- the same "next page" affordance the APRS history already uses, so there is one
+  pagination idiom in the TUI rather than two;
+- `chooseUser` currently also needs the full map to answer "would this demote the
+  last sysop", so that check has to become a count query before the page can be
+  narrowed. That is the part that makes this Medium rather than Small.
+
+Until then the list stays correct, just slower, and the threshold in "When to
+leave SQLite" is not affected by it.
 
 ## When to leave SQLite
 
