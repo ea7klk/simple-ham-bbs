@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,5 +177,72 @@ func TestTailFollowsRotation(t *testing.T) {
 	}
 	if next != 0 {
 		t.Fatalf("offset after rotation = %d, want 0", next)
+	}
+}
+
+// A child that outlives the deadline is killed, and the watchdog gets control
+// back instead of blocking in Wait forever.
+func TestRunSupervisedProcessKillsWedgedChild(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	// Use real files for the child's output, as the production caller does with
+	// os.Stdout: a non-file writer makes exec spawn a copying goroutine, and
+	// then WaitDelay governs how long Wait keeps waiting on it.
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+
+	start := time.Now()
+	timedOut, err := runSupervisedProcess([]string{"/bin/sh", "-c", "sleep 30"}, 200*time.Millisecond, devNull, devNull)
+	elapsed := time.Since(start)
+
+	if !timedOut {
+		t.Fatalf("timedOut = false, err = %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("kill took %s; the watchdog would still be blocked", elapsed)
+	}
+}
+
+func TestRunSupervisedProcessReportsNormalExit(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	timedOut, err := runSupervisedProcess([]string{"/bin/sh", "-c", "exit 0"}, 5*time.Second, io.Discard, io.Discard)
+	if timedOut {
+		t.Fatal("a quick exit was reported as a timeout")
+	}
+	if err != nil {
+		t.Fatalf("normal exit returned %v", err)
+	}
+}
+
+func TestRunSupervisedProcessReportsFailure(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	timedOut, err := runSupervisedProcess([]string{"/bin/sh", "-c", "exit 3"}, 5*time.Second, io.Discard, io.Discard)
+	if timedOut {
+		t.Fatal("a failing exit was reported as a timeout")
+	}
+	if err == nil {
+		t.Fatal("non-zero exit returned no error")
+	}
+}
+
+func TestRunSupervisedProcessReportsStartError(t *testing.T) {
+	if _, err := runSupervisedProcess([]string{"/nonexistent/bbs-test-binary"}, time.Second, io.Discard, io.Discard); err == nil {
+		t.Fatal("starting a missing binary returned no error")
+	}
+}
+
+// The receiver gets a longer ceiling than its own hourly restart, or the
+// watchdog would kill healthy processes.
+func TestReceiverRuntimeCeilingExceedsSelfRestart(t *testing.T) {
+	if aprsReceiverMaxRuntime <= aprsReceiverRestartInterval {
+		t.Fatalf("ceiling %s does not exceed the receiver's own %s restart", aprsReceiverMaxRuntime, aprsReceiverRestartInterval)
 	}
 }

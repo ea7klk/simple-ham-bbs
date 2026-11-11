@@ -850,11 +850,27 @@ thread.
   on one; the banner carries the marker only for a sysop session; and the
   bootstrap-state reporter logs unclaimed, pending, and nothing once a sysop
   exists.
-- **L9. Watchdog cannot recover a wedged child.** `watchAPRSReceiver()`
-  (`aprs_supervisor.go:52-77`) starts the receiver and blocks in `Wait()` with
-  no timeout or kill path. The receiver's own hourly restart usually saves it,
-  but a receiver stuck in a dial or a filesystem call leaves the watchdog
-  waiting forever. Add a context with a deadline and `cmd.Process.Kill()`.
+- **L9. Watchdog could not recover a wedged child — FIXED.**
+  `watchAPRSReceiver()` started the receiver and blocked in `Wait()` with no
+  timeout or kill path, so a receiver stuck in a dial or a filesystem call left
+  the watchdog waiting forever — the hourly self-restart only helps a child that
+  is still making progress.
+
+  The supervisor now runs each receiver through `runSupervisedProcess`
+  (`aprs_supervisor.go`), which uses `exec.CommandContext` with a **75-minute
+  ceiling** and reports whether the deadline fired, so the log distinguishes
+  "killed because wedged" from "exited with an error". 75 minutes sits above the
+  receiver's own 60-minute restart, so a healthy process is never killed; a
+  test asserts that relationship rather than trusting the constant.
+
+  `cmd.WaitDelay` (10 s) bounds the wait for output to drain after the kill, so a
+  stuck pipe cannot re-create the same stall. The receiver spawns no children, so
+  killing the direct child is sufficient here — a supervisor for a process that
+  does spawn children would also need a process group.
+
+  Tests: a child outliving its deadline is killed and the call returns promptly,
+  normal and failing exits are reported correctly, a missing binary surfaces the
+  start error, and the ceiling exceeds the receiver's self-restart interval.
 - **L10. Triple restart layering.** The entrypoint loops the supervisor
   (`docker-entrypoint.sh:79-87`), the supervisor loops the receiver, and the
   receiver loops its own reconnect with `restartAt`. Three independent retry

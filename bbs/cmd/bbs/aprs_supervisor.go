@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,14 @@ import (
 const (
 	logRetention           = 7 * 24 * time.Hour
 	aprsReceiverRetryDelay = 10 * time.Second
+	// aprsReceiverMaxRuntime is a hard ceiling on one receiver process. The
+	// receiver restarts itself after an hour, so anything still running past
+	// this is wedged — stuck in a dial, a write, or a filesystem call — and the
+	// watchdog has to break the deadlock rather than wait forever.
+	aprsReceiverMaxRuntime = 75 * time.Minute
+	// aprsReceiverWaitDelay bounds how long Wait keeps waiting for the child's
+	// output to drain after the kill, so a stuck pipe cannot stall the watchdog.
+	aprsReceiverWaitDelay = 10 * time.Second
 )
 
 var supervisorOutputMu sync.Mutex
@@ -55,22 +64,39 @@ func (a *app) watchAPRSReceiver() error {
 		return err
 	}
 	for {
-		cmd := exec.Command(exe, "aprs-receiver")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			a.logAPRSReceiver("APRS receiver watchdog start error: %v; retrying in %s", err, aprsReceiverRetryDelay)
-			time.Sleep(aprsReceiverRetryDelay)
-			continue
-		}
-		err := cmd.Wait()
-		if err != nil {
+		timedOut, err := runSupervisedProcess([]string{exe, "aprs-receiver"}, aprsReceiverMaxRuntime, os.Stdout, os.Stderr)
+		switch {
+		case timedOut:
+			a.logAPRSReceiver("APRS receiver exceeded %s; killed and restarting in %s", aprsReceiverMaxRuntime, aprsReceiverRetryDelay)
+		case err != nil:
 			a.logAPRSReceiver("APRS receiver exited with error: %v; restarting in %s", err, aprsReceiverRetryDelay)
-		} else {
+		default:
 			a.logAPRSReceiver("APRS receiver exited normally; restarting in %s", aprsReceiverRetryDelay)
 		}
 		time.Sleep(aprsReceiverRetryDelay)
 	}
+}
+
+// runSupervisedProcess runs argv, killing it if it outlives timeout, and waits
+// for it either way.
+//
+// A plain cmd.Wait() blocks until the child exits, so a receiver wedged in a
+// dial kept the watchdog waiting indefinitely — the hourly self-restart only
+// helps a child that is still making progress. The context puts a hard ceiling
+// on one run; WaitDelay bounds the wait for output to drain afterwards.
+func runSupervisedProcess(argv []string, timeout time.Duration, stdout, stderr io.Writer) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.WaitDelay = aprsReceiverWaitDelay
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	err := cmd.Wait()
+	return ctx.Err() == context.DeadlineExceeded, err
 }
 
 func (a *app) rotateRuntimeLogsNightly() {
