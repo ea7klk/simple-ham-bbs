@@ -1,6 +1,6 @@
 # APRS bulletins in the BBS
 
-Status: **text-mode implementation done** (v1.30). Web version not implemented.
+Status: **text-mode implementation done**. Web version not implemented.
 Date: 2026-11-11
 
 ## Goal
@@ -120,7 +120,8 @@ raw group is displayed next to it.
 
 ## Screens
 
-A new entry in the APRS menu, read-only and available to any logged-in user. It
+Implemented as a new entry in the APRS menu (`APRS bulletins`), read-only and
+available to any logged-in user. It
 is deliberately **not** gated on `EnableAPRS`: that flag governs sending and
 receiving mail for an account, and reading public bulletins harms nobody.
 
@@ -146,3 +147,19 @@ a repeated bulletin does not look stale.
   here as a possible refinement.
 - **Web version.** Not implemented. The table is shared with the web BBS, so a
   web screen can read `db_aprs_bulletins` directly without further backend work.
+
+## Implementation notes
+
+- `bbs/cmd/bbs/aprs_bulletins.go` — parsing, categorisation, storage, retention,
+  and the relative-age renderer.
+- `bbs/cmd/bbs/aprs_bulletin_ui.go` — the three screens.
+- The receive loop checks `parseBulletinAddress` **before** the per-user path and
+  `continue`s, so a bulletin never reaches the ack queue or
+  `db_aprs_receiveds`. That is what keeps a group address from being treated as
+  a station to answer.
+- The category menu lists only categories that currently hold something, so it
+  reflects what has been heard rather than the whole taxonomy.
+- Translations: 40 new keys × 4 languages, including a label and a description
+  for every category.
+- `pruneAPRSBulletins` runs with the other nightly housekeeping in
+  `rotateRuntimeLogsNightly`.

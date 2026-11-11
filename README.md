@@ -239,6 +239,24 @@ queued instead of dialled inline: the queue holds 64, sends at most one every
 ten seconds, and drops (with a logged count) when inbound traffic outruns that
 budget, so no third party can turn inbound packets into an outbound dial storm.
 
+### APRS bulletins
+
+Bulletins broadcast on APRS-IS are collected and can be read from
+`APRS bulletins` in the APRS menu. A bulletin addresses a group (`BLN1NWS`), not
+a callsign, so it is stored once for everyone rather than per user.
+
+- Every bulletin heard in the **last ten days**, measured from the last time it
+  was heard, so one still being transmitted stays available.
+- Grouped into categories: weather, emergency, traffic, nets, events, DX,
+  satellite, network, service, organisation, test, general, and other.
+  Categorisation uses the declared group first, then keywords in the text.
+- Repeated bulletins are stored once with a count of how many times they were
+  heard, rather than filling the list with copies.
+- Reading is open to any logged-in user; it is not gated on `EnableAPRS`.
+
+The full design, including the categories and their descriptions, is in
+`APRS-Bulletins.md`.
+
 APRS send attempts, generated packets, APRS-IS login responses, and receiver
 activity are appended to `/var/lib/bbs/aprs/aprs.log`. BBS user and sysop
 activity is appended to `/var/lib/bbs/bbs.log`. The supervisor tails both files

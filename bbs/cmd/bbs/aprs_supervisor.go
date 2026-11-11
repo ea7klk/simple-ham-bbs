@@ -116,6 +116,9 @@ func (a *app) rotateRuntimeLogsNightly() {
 		if err := a.pruneTokens(time.Now().UTC()); err != nil {
 			a.logAPRSReceiver("Account token prune error: %v", err)
 		}
+		if err := a.pruneAPRSBulletins(time.Now().UTC()); err != nil {
+			a.logAPRSReceiver("APRS bulletin prune error: %v", err)
+		}
 	}
 }
 

@@ -39,6 +39,7 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 			{"4", a.t(lang, "aprs_join_aprs_thursday")},
 			{"5", a.t(lang, "aprs_join_aprsph")},
 			{"6", a.t(lang, "aprs_set_enabled")},
+			{"7", a.t(lang, "aprs_bulletins_menu")},
 			{"q", a.t(lang, "menu_quit")},
 		})
 		switch choice {
@@ -52,6 +53,8 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 			a.joinAPRSThursday(callsign, profile, lang)
 		case "5":
 			a.joinAPRSPH(callsign, profile, lang)
+		case "7":
+			a.showAPRSBulletinCategories(lang)
 		case "6":
 			_, values, ok := a.runForm(lang, a.t(lang, "aprs_enable_title"), []formField{{name: "enable_aprs", label: a.t(lang, "enable_aprs"), kind: fieldChoice, value: boolString(profile.EnableAPRS), choices: []option{{"false", "false"}, {"true", "true"}}}}, []string{"save", "cancel"})
 			if ok {

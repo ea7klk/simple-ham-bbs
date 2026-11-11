@@ -135,6 +135,20 @@ func (a *app) receiveAPRSLoop(login string, passcode int, restartAt time.Time) e
 			continue
 		}
 		msg := packet.Message
+
+		// A bulletin addresses BLNn + a group, not a callsign, so it matches no
+		// account and the per-user path below would drop it. It gets its own
+		// shared store, and it is never acknowledged: a bulletin is not a
+		// message to one station.
+		if addr, isBulletin := parseBulletinAddress(msg.To); isBulletin {
+			if _, created, err := a.storeAPRSBulletin(msg, addr); err != nil {
+				a.logAPRSReceiver("APRS bulletin store error from=%s group=%s: %v", msg.From, addr.Group, err)
+			} else if created {
+				a.logAPRSReceiver("APRS bulletin received from=%s slot=%d group=%q category=%s", msg.From, addr.Slot, addr.Group, bulletinCategory(addr.Group, msg.Text))
+			}
+			continue
+		}
+
 		if msg.MessageID != "" {
 			user, enabled, err := a.aprsRecipientEnabled(msg.To)
 			if err != nil {

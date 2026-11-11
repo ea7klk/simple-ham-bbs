@@ -84,6 +84,26 @@ type dbAPRSSentPart struct {
 	Acked     bool
 }
 
+// dbAPRSBulletin is one APRS bulletin, shared by all users rather than stored
+// per recipient: a bulletin addresses BLNn + a group, not a callsign.
+//
+// Bulletins repeat — weather products are retransmitted every few minutes — so
+// the row is keyed by content (DedupeKey) and a repeat bumps SeenCount and
+// LastSeen instead of adding a row.
+type dbAPRSBulletin struct {
+	ID        uint   `gorm:"primaryKey"`
+	DedupeKey string `gorm:"uniqueIndex;size:64"`
+	FirstSeen string `gorm:"index"`
+	LastSeen  string `gorm:"index"`
+	SeenCount int
+	From      string `gorm:"index"`
+	Slot      int
+	Group     string `gorm:"size:8;index"`
+	Category  string `gorm:"size:24;index"`
+	Text      string
+	Raw       string
+}
+
 type dbAPRSReceived struct {
 	ID           uint   `gorm:"primaryKey"`
 	UserCallsign string `gorm:"index"`
@@ -125,7 +145,7 @@ func openDatabase(path string) (*gorm.DB, error) {
 // records completion so a session can tell whether the one-shot has happened
 // without doing the work itself.
 func migrateDatabase(db *gorm.DB) error {
-	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAuthFailure{}, &dbRegistration{}, &dbActivation{}, &dbToken{}, &dbSetting{}); err != nil {
+	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAPRSBulletin{}, &dbAuthFailure{}, &dbRegistration{}, &dbActivation{}, &dbToken{}, &dbSetting{}); err != nil {
 		return err
 	}
 	if err := backfillRegistered(db); err != nil {
