@@ -297,7 +297,9 @@ it, so a placeholder can be committed without weakening anything:
   committed and never reverted by drift correction.
 
 To turn mail on, set the real Mailcow password in the `bbs-env` Secret — in
-Rancher under **Storage → Secrets → `bbs-env`**, or from a shell:
+Rancher under **Storage → Secrets → `bbs-env`** (that form holds base64 values,
+so paste `printf '%s' '<password>' | base64 -w0` unless it offers plain-text
+entry), or from a shell where the value is plaintext:
 
 ```sh
 kubectl -n ham-bbs patch secret bbs-env --type merge \
