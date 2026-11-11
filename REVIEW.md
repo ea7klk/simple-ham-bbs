@@ -967,6 +967,22 @@ upgrade. The cost is that the *unconfigured* state silently provides weaker
 assurance than the configured one, which is why each case writes a distinct log
 line and `README.md` states it.
 
+**Migration hazard, found in production.** The `activated` column is added by
+`AutoMigrate`, which leaves existing rows **NULL**, and the first version of the
+backfill used `WHERE activated = false`. In SQL that does not match NULL, so the
+sweep updated nothing — and still recorded its one-time marker, which would have
+kept every existing account permanently unactivated. It was caught on the live
+database immediately after deploy (`typeof(activated)` → `null`) because mail is
+not configured there, so the damage was latent rather than user-visible.
+
+The fix treats the two cases separately: NULL is never a deliberate value and is
+repaired on every start, while the once-only `false → true` sweep stays bounded
+by the marker. A regression test inserts a NULL row with the marker already
+present, which is precisely the broken state, and asserts it is repaired. The
+general lesson for this codebase: a backfill guarded by a marker must be tested
+against the schema state `AutoMigrate` actually produces, not the one a fresh
+insert produces.
+
 **Activation.** A 4-character code from `A–Z` and `2–9`. `I`, `O`, `0` and `1`
 are excluded because the code is read off a screen and typed back, and those are
 the glyphs people transcribe wrongly; the alphabet is still capitals plus digits,

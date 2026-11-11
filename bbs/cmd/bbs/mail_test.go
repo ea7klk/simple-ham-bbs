@@ -590,6 +590,44 @@ func TestBackfillActivatedRunsOnce(t *testing.T) {
 	}
 }
 
+// A column added by migration leaves NULL in existing rows, which `= false` does
+// not match. That is exactly how the first version of the backfill failed in
+// production while still recording its one-time marker.
+func TestBackfillActivatedRepairsNullRowsEvenAfterTheMarker(t *testing.T) {
+	a := testApp(t)
+	if err := a.db.Exec("INSERT INTO db_users (callsign, email, activated) VALUES (?, ?, NULL)", "NULLY", "n@example.org").Error; err != nil {
+		t.Fatal(err)
+	}
+	// openDatabase already wrote the marker, which is the state the live
+	// database was in when the bug shipped.
+	var markers int64
+	if err := a.db.Model(&dbSetting{}).Where("key = ?", "migrated.activation").Count(&markers).Error; err != nil {
+		t.Fatal(err)
+	}
+	if markers != 1 {
+		t.Fatal("expected the one-time marker to be present")
+	}
+
+	if err := backfillActivated(a.db); err != nil {
+		t.Fatal(err)
+	}
+	repaired, _, err := a.loadUser("NULLY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repaired.Activated {
+		t.Fatal("a NULL activated column was not repaired")
+	}
+
+	var nulls int64
+	if err := a.db.Model(&dbUser{}).Where("activated IS NULL").Count(&nulls).Error; err != nil {
+		t.Fatal(err)
+	}
+	if nulls != 0 {
+		t.Fatalf("%d rows still NULL after the backfill", nulls)
+	}
+}
+
 func TestPruneTokensDropsExpiredRows(t *testing.T) {
 	a := testApp(t)
 	now := time.Now()

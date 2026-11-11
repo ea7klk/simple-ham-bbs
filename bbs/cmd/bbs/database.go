@@ -117,24 +117,34 @@ func openDatabase(path string) (*gorm.DB, error) {
 	return db, nil
 }
 
-// backfillActivated marks every pre-existing account as activated, once.
+// backfillActivated marks pre-existing accounts as activated.
 //
 // The column defaults to false, which is right for a new registration and wrong
-// for every account that existed before activation was introduced; without this
-// they would all be forced through an activation flow on their next login. A
-// marker row makes the update run exactly once, so a later deliberately
-// unactivated account is never flipped.
+// for every account that existed before activation was introduced, so two things
+// have to happen:
+//
+//   - Rows where the column is NULL were created by the migration that added it.
+//     NULL is never a deliberate value, so those are corrected on every start.
+//     This also repairs a database where an earlier version of this function ran
+//     with a `= false` predicate that could not match NULL and then recorded the
+//     one-time marker anyway.
+//   - Rows that are explicitly false predate activation too, but only the first
+//     time: a later account that is deliberately unactivated must stay that way.
+//     The marker row bounds it to one sweep.
 func backfillActivated(db *gorm.DB) error {
 	const key = "migrated.activation"
-	marker := dbSetting{}
-	err := db.Where("key = ?", key).Take(&marker).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&dbUser{}).Where("activated IS NULL").UpdateColumn("activated", true).Error; err != nil {
+			return err
+		}
+		marker := dbSetting{}
+		err := tx.Where("key = ?", key).Take(&marker).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 		if err := tx.Model(&dbUser{}).Where("activated = ?", false).UpdateColumn("activated", true).Error; err != nil {
 			return err
 		}
