@@ -795,11 +795,17 @@ thread.
   `0644` one. Accepted on that basis, with the caveat recorded: if the web BBS
   ever moves to a non-root uid, the two images should agree on a group and the
   files should move to `0640` together.
-- **L6. `/etc/bbs/bbs.env` is `0644` and sourced by bash**
-  (`docker-entrypoint.sh:10-18`, `bbs_session.sh:4-9`). It deliberately excludes
-  `BBS_USER_PASSWORD`, and `printf '%q'` quoting is correct, so this is safe as
-  written — but it is a shell-parsed file with an implicit "operator input is
-  trusted" assumption. Note it, do not celebrate it.
+- **L6. `/etc/bbs/bbs.env` is `0644` and sourced by bash — ACCEPTED.**
+  (`docker-entrypoint.sh`, `bbs_session.sh`). The file deliberately excludes
+  `BBS_USER_PASSWORD`, every value is written with `printf '%q'` so the
+  serialisation round-trips through the shell safely, and the writer is the
+  entrypoint itself — the only thing that can put content there is the operator's
+  own environment. Accepted on that basis, with the assumption stated so it is
+  not mistaken for a property of the format: this is a shell-parsed file whose
+  safety rests on `%q` quoting and on operator input being trusted. If a future
+  change ever writes a value there from user input, or drops `%q`, the file
+  becomes an injection vector and must be replaced with explicit `export`
+  statements or a non-shell format.
 - **L7. `readJSON` swallows malformed JSON** (`storage.go:147-164`): a corrupt
   `translations.json` silently yields an empty translation map and a UI full of
   raw keys. Log the parse error instead of falling back silently.
