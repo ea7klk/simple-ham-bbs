@@ -795,16 +795,22 @@ thread.
   `0644` one. Accepted on that basis, with the caveat recorded: if the web BBS
   ever moves to a non-root uid, the two images should agree on a group and the
   files should move to `0640` together.
-- **L6. `/etc/bbs/bbs.env` is `0644` and sourced by bash — ACCEPTED.**
-  (`docker-entrypoint.sh`, `bbs_session.sh`). The file deliberately excludes
-  `BBS_USER_PASSWORD`, every value is written with `printf '%q'` so the
-  serialisation round-trips through the shell safely, and the writer is the
-  entrypoint itself — the only thing that can put content there is the operator's
-  own environment. Accepted on that basis, with the assumption stated so it is
-  not mistaken for a property of the format: this is a shell-parsed file whose
-  safety rests on `%q` quoting and on operator input being trusted. If a future
-  change ever writes a value there from user input, or drops `%q`, the file
-  becomes an injection vector and must be replaced with explicit `export`
+- **L6. `/etc/bbs/bbs.env` is shell-parsed and sourced by bash — ACCEPTED, with
+  the assumptions now enforced.** (`docker-entrypoint.sh`, `bbs_session.sh`).
+  Every value is written with `printf '%q'`, so the serialisation round-trips
+  through the shell safely, and the writer is the entrypoint itself — only the
+  operator's own environment can put content there.
+
+  **Changed 2026-11-11:** the file now carries `BBS_SMTP_PASSWORD`, so the
+  earlier "it deliberately excludes secrets, therefore `0644` is fine" reasoning
+  no longer holds. The file is now `0600` and owned by `bbs:bbs`, and only the
+  session user can read it. The distinction matters: before, the acceptance
+  rested on there being nothing to leak; now it rests on the file being closed.
+
+  The residual assumption is unchanged and worth stating: this is a
+  shell-parsed file whose safety rests on `%q` quoting and on operator input
+  being trusted. If a future change writes a value there from user input, or
+  drops `%q`, it becomes an injection vector and must move to explicit `export`
   statements or a non-shell format.
 - **L7. `readJSON` swallowed malformed JSON — FIXED.** A corrupt
   `translations.json` silently yielded an empty translation map, so the BBS came
@@ -936,6 +942,78 @@ thread.
   a clean logout.
 
 ---
+
+## Email module (added 2026-11-11)
+
+Three account flows now depend on outbound mail: activation at registration, a
+password reset from the login screen, and the double confirmation of an email
+change. This section records the design and the security properties, because the
+feature moves credential material and trust decisions into new places.
+
+**Configuration.** Everything comes from the environment (`BBS_SMTP_*`,
+`BBS_WEB_BASE_URL`), with Mailcow-shaped defaults in `.env.example`. Mail is
+enabled only when a host **and** a sender are set. The entrypoint writes the
+values into `/etc/bbs/bbs.env`, which now carries `BBS_SMTP_PASSWORD` and is
+therefore `0600` owned by `bbs:bbs` — see the re-scoped L6 note. The image gains
+no library: the client is `net/smtp` with explicit TLS setup and a single
+deadline for the whole conversation, so a stalled server cannot hold a login
+open.
+
+**Fail-open is deliberate and logged.** With no mail configured, activation is
+skipped (`activation_skipped`), password reset says so, and an email change is
+applied immediately with `email_change_unverified`. The alternative — refusing
+registrations until SMTP exists — would have broken every existing deployment on
+upgrade. The cost is that the *unconfigured* state silently provides weaker
+assurance than the configured one, which is why each case writes a distinct log
+line and `README.md` states it.
+
+**Activation.** A 4-character code from `A–Z` and `2–9`. `I`, `O`, `0` and `1`
+are excluded because the code is read off a screen and typed back, and those are
+the glyphs people transcribe wrongly; the alphabet is still capitals plus digits,
+as specified. The code is stored as SHA-256 bound to the callsign, expires in 24
+hours, and allows five wrong attempts before it is discarded. Attempts live in
+the database, so reconnecting does not reset them. Activation runs **after** the
+password check, so an unactivated account cannot be claimed by whoever types the
+callsign first.
+
+Residual: a 4-character code is ~1.05 million possibilities, which is only safe
+because of the attempt cap and the per-address login lockout from M1. If either
+is relaxed, the code length must grow with it. Codes are also sent in clear text
+and are valid for 24 hours, so mailbox compromise is equivalent to account
+compromise for that window — unavoidable without a second channel.
+
+**Tokens.** 32 random bytes, base64url, stored only as a hex SHA-256 hash. Reset
+tokens live 2 hours, email-change tokens 24 hours, both single-use, both pruned
+alongside the other nightly housekeeping. Because only the hash is stored, a copy
+of the database does not yield a redeemable link.
+
+**Password reset.** Reachable from the login screen. The reply is identical
+whether or not the account exists, and unknown identifiers, disabled accounts and
+over-quota requests are silent no-ops — this is the one place where a difference
+would help an attacker and costs nothing to hide. Requests are capped at three
+per account per hour. The account is looked up by callsign or by email address
+(case-insensitive).
+
+**Email change.** Two tokens share one `change_id`: one goes to the current
+address to approve, one to the new address to validate. The address is not
+touched until both are consumed; `applyEmailChanges` then performs the write at
+startup and after each login. A stolen session can therefore request a change but
+cannot complete it, which is the point of the second link. Expired halves are
+discarded rather than left half-done.
+
+**Web BBS contract.** Links point at `BBS_WEB_BASE_URL`, never at SSH. The web
+front end redeems them out of the shared SQLite database (the same volume
+documented under L5): match `db_tokens.token_hash`, reject if `consumed_at` is
+set or `expires_at` has passed, then set `consumed_at`. For password reset it
+must also write `db_users.password_hash` in this application's PBKDF2 format;
+`README.md` documents the exact format.
+
+**What this does not do.** It does not authenticate the mail (no DKIM signing
+here — that belongs to the mail server, and Mailcow signs if configured), does
+not verify that an address exists beyond the click, does not rate-limit by
+address for the reset flow (only per account), and does not encrypt mail in
+transit beyond the SMTP TLS session. Those are properties of running mail, not of
+this code, and `README.md` points at them.
 
 ## Architecture review
 

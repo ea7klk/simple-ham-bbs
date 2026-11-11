@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -54,7 +55,7 @@ func newApp() (*app, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &app{cfg: cfg, text: text, db: db}, nil
+	return &app{cfg: cfg, text: text, db: db, mail: newMailerFromEnv()}, nil
 }
 
 func env(name, fallback string) string {
@@ -157,6 +158,9 @@ func (a *app) seedData() error {
 		return err
 	}
 	a.reportBootstrapSysopState()
+	if err := a.applyEmailChanges(time.Now()); err != nil {
+		a.logBBSAction("", "email_change_apply_failed", "error=%q", err.Error())
+	}
 	return a.normalizeReceivedAPRSStore()
 }
 

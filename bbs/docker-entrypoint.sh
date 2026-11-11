@@ -10,11 +10,15 @@ host_key_dir="/config/ssh/host_keys"
 write_bbs_env() {
   mkdir -p /etc/bbs
   {
-    for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_DB_FILE BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY; do
+    for name in BBS_NAME BBS_SYSOP BBS_SYSOPS BBS_LOCATION BBS_WELCOME_TOPIC BBS_DATA_DIR BBS_DB_FILE BBS_TRANSLATIONS_FILE APRS_IS_SERVER APRS_IS_PORT APRS_RECEIVER_CALLSIGN BBS_FALLBACK_GATEWAY BBS_SMTP_HOST BBS_SMTP_PORT BBS_SMTP_SECURITY BBS_SMTP_USERNAME BBS_SMTP_PASSWORD BBS_SMTP_FROM BBS_SMTP_FROM_NAME BBS_WEB_BASE_URL; do
       printf '%s=%q\n' "$name" "${!name:-}"
     done
   } > /etc/bbs/bbs.env
-  chmod 644 /etc/bbs/bbs.env
+  # This file now carries the SMTP credential, so it is readable only by the
+  # account that runs a session. It previously held no secrets; keep it that
+  # way or keep it closed, never both.
+  chown bbs:bbs /etc/bbs/bbs.env
+  chmod 600 /etc/bbs/bbs.env
 }
 
 configure_login_password() {

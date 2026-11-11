@@ -378,14 +378,34 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.String() == "enter" && field.kind != fieldTextArea {
-			if m.noButtons && m.focus == len(m.fields)-1 {
-				values, err := m.validate()
-				if err != "" {
-					m.err = err
-					return m, nil
+			if m.focus == len(m.fields)-1 {
+				// Enter in the last field submits: with no buttons it is the only
+				// way forward, and in a buttoned form it is the conventional
+				// default for the primary action. Scripted sessions therefore do
+				// not need to reach the buttons.
+				if m.noButtons {
+					values, err := m.validate()
+					if err != "" {
+						m.err = err
+						return m, nil
+					}
+					m.action, m.values, m.done = "submit", values, true
+					return m, tea.Quit
 				}
-				m.action, m.values, m.done = "submit", values, true
-				return m, tea.Quit
+				if len(m.buttons) > 0 {
+					button := m.buttons[0]
+					if button == "cancel" || button == "delete" {
+						m.action, m.done = button, true
+						return m, tea.Quit
+					}
+					values, err := m.validate()
+					if err != "" {
+						m.err = err
+						return m, nil
+					}
+					m.action, m.values, m.done = button, values, true
+					return m, tea.Quit
+				}
 			}
 			m.setFocus(m.focus + 1)
 			return m, nil

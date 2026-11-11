@@ -31,15 +31,19 @@ func (a *app) authenticate() (string, userProfile, error) {
 			header.WriteString(languages[code] + ": " + truncateText(strings.Join(a.tList(code, "login_info"), " "), panelContentWidth-12) + "\n")
 		}
 		loginTitle := "Login\n" + strings.TrimSpace(header.String())
-		_, values, ok := a.runForm("en", loginTitle, []formField{
+		action, values, ok := a.runForm("en", loginTitle, []formField{
 			{
 				name: "callsign", label: a.t("en", "callsign_prompt"), required: true, limit: 16,
 				normalizer: normalizeCallsign, validator: func(v string) bool { return callsignRE.MatchString(v) }, invalidText: a.t("en", "invalid_callsign"),
 			},
 			{name: "password", label: a.t("en", "password"), kind: fieldPassword},
-		}, nil)
+		}, []string{"login", "forgot"})
 		if !ok {
 			return "", userProfile{}, errLoginCancelled
+		}
+		if action == "forgot" {
+			a.forgotPassword("en")
+			continue
 		}
 		callsign := normalizeCallsign(values["callsign"])
 		password := values["password"]
@@ -66,6 +70,15 @@ func (a *app) authenticate() (string, userProfile, error) {
 			if err := a.recordRegistration(address, time.Now()); err != nil {
 				a.logBBSAction(callsign, "registration_throttle_error", "address=%q error=%q", address, err.Error())
 			}
+			profile, ok = a.activateAccount(callsign, profile, profile.Language)
+			if !ok {
+				// The account exists but is not activated. It is kept so the
+				// caller can finish later with a fresh code.
+				return "", userProfile{}, errLoginCancelled
+			}
+			if err := a.saveUser(callsign, profile); err != nil {
+				return "", userProfile{}, err
+			}
 			return callsign, profile, nil
 		}
 		lang := profile.Language
@@ -87,6 +100,19 @@ func (a *app) authenticate() (string, userProfile, error) {
 			return callsign, profile, nil
 		}
 		if verifyPassword(password, profile.PasswordHash) {
+			// Activation runs only after the password checks out, so an
+			// unactivated account cannot be claimed by whoever guesses the
+			// callsign first.
+			if !profile.Activated {
+				profile, ok = a.activateAccount(callsign, profile, lang)
+				if !ok {
+					return "", userProfile{}, errLoginCancelled
+				}
+				users[callsign] = profile
+				if err := a.saveUser(callsign, profile); err != nil {
+					return "", userProfile{}, err
+				}
+			}
 			if !profileComplete(profile) {
 				profile, ok = a.register(callsign, profile, false)
 				if !ok {
@@ -138,7 +164,13 @@ func (a *app) register(callsign string, profile userProfile, forcePassword bool)
 	profile.IsSysop = profile.IsSysop || a.isBootstrapSysop(callsign)
 	for {
 		fields := a.profileFields(profile, true, forcePassword || profile.PasswordHash == "")
-		_, values, ok := a.runForm(profile.Language, a.t(profile.Language, "registration_form_title")+" - "+callsign, fields, []string{"save", "cancel"})
+		title := a.t(profile.Language, "registration_form_title") + " - " + callsign
+		if a.mail.Enabled() {
+			// Say it before the form, not after submitting it: the address typed
+			// here is where the activation code will be sent.
+			title += "\n" + dimStyle.Render(a.t(profile.Language, "activation_notice"))
+		}
+		_, values, ok := a.runForm(profile.Language, title, fields, []string{"save", "cancel"})
 		if !ok {
 			return profile, false
 		}
@@ -162,11 +194,41 @@ func (a *app) changeProfile(callsign string, profile userProfile, lang string) u
 	if !ok || action == "cancel" {
 		return profile
 	}
+	previousEmail := profile.Email
 	profile = applyProfileValues(profile, values)
 	if values["new_password"] != "" {
 		profile.PasswordHash = hashPassword(values["new_password"])
 	}
 	profile.LastSeen = now()
+
+	// An address change needs two confirmations before it takes effect. The
+	// pending address is not applied here; it waits for both links.
+	emailChanged := previousEmail != profile.Email
+	if emailChanged && a.mail.Enabled() {
+		if err := a.beginEmailChange(callsign, previousEmail, profile.Email, profile.Language); err != nil {
+			a.logBBSAction(callsign, "email_change_failed", "from=%q to=%q error=%q", previousEmail, profile.Email, err.Error())
+			profile.Email = previousEmail
+			a.showMutationError(lang, a.t(lang, "profile_form_title"), err)
+			return profile
+		}
+		profile.Email = previousEmail
+		profile.LastSeen = now()
+		if err := a.saveUser(callsign, profile); err != nil {
+			a.showMutationError(lang, a.t(lang, "profile_form_title"), err)
+			return profile
+		}
+		a.showInfo(profile.Language, a.t(profile.Language, "profile_form_title"), [][]string{
+			{a.t(profile.Language, "email_change_pending")},
+			{a.t(profile.Language, "email_change_pending_detail"), previousEmail},
+		})
+		return profile
+	}
+	if emailChanged {
+		// Without a mail path there is nothing to confirm with. Applying the
+		// change keeps an unconfigured deployment usable, and the log records
+		// that it was not verified.
+		a.logBBSAction(callsign, "email_change_unverified", "from=%q to=%q reason=%q", previousEmail, profile.Email, "mail is not configured")
+	}
 	if err := a.saveUser(callsign, profile); err != nil {
 		// Do not hand the caller a profile that was never stored: it drives the
 		// session language and every later screen.

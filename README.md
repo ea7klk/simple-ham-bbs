@@ -95,6 +95,13 @@ The SSH account is only the transport. The BBS has its own callsign-based accoun
 - Five failed BBS passwords from one address within fifteen minutes lock that address out for fifteen minutes. The counter is shared by all sessions, so reconnecting does not reset it.
 - New accounts are limited to five per hour from one address. Completing an existing profile is not counted.
 - The banner shows `[Sysop]` next to the callsign when the session has the sysop role, on every screen.
+- Accounts are activated by email when SMTP is configured: registration says a
+  code is coming, and a 4-character code (capitals and digits) must be entered
+  before the account can be used. Without SMTP, activation is skipped and logged.
+- `Forgot password` on the login screen emails a reset link valid for 2 hours.
+- Changing the email address in the profile sends one confirmation link to the
+  current address and one validation link to the new address; the change applies
+  only when both are confirmed, and the links are valid for 24 hours.
 
 Sysop users can administer accounts from the sysop menu:
 
@@ -242,6 +249,64 @@ Future APRS work can add:
 
 - Local-only dry-run mode for testing
 - A menu screen for station beacons and delivery acknowledgements
+
+## Email
+
+Three account flows use outbound mail: activation at registration, password
+reset, and the double confirmation of an email change. All of it is optional and
+configured from the environment, so no credential lives in this repository.
+
+```sh
+# Mailcow-shaped defaults; see .env.example.
+BBS_SMTP_HOST=mail.ea7lk.es
+BBS_SMTP_PORT=587
+BBS_SMTP_SECURITY=starttls      # starttls (587) | tls (465) | none (local relay)
+BBS_SMTP_USERNAME=bbs@ea7lk.es
+BBS_SMTP_PASSWORD=...
+BBS_SMTP_FROM=bbs@ea7lk.es
+BBS_SMTP_FROM_NAME=HAMNET Radio BBS
+BBS_WEB_BASE_URL=https://bbs.ea7lk.es
+```
+
+Mail is enabled only when `BBS_SMTP_HOST` and `BBS_SMTP_FROM` are both set. With
+mail disabled the BBS stays usable: activation is skipped (and logged as
+`activation_skipped`), password reset reports that email is not configured, and
+an email change is applied immediately with a log line saying it was unverified.
+
+Messages are sent in the user's language (English, German, Spanish, French) and
+contain a plain-text link, never an HTML body. Sending is synchronous with a 20 s
+deadline, so a stalled server cannot hold a login open.
+
+### Tokenised links and the web BBS
+
+Reset and email-change links point at `BBS_WEB_BASE_URL`, not at the SSH
+service:
+
+```
+https://bbs.ea7lk.es/reset?token=<token>
+https://bbs.ea7lk.es/email/confirm?token=<token>
+```
+
+The tokens live in the SQLite database the BBS already shares with the web BBS
+(`/var/lib/bbs`), so the web front end can honour a link without calling back
+here. The contract is small:
+
+- `db_tokens.token_hash` is the hex SHA-256 of the token in the URL. Look the row
+  up by that hash; nothing else in the database identifies the link.
+- Reject the link when `consumed_at` is set or `expires_at` has passed. Set
+  `consumed_at` to the current Unix time when it is accepted — tokens are
+  single-use.
+- `purpose` is `password_reset`, `email_change_old` or `email_change_new`.
+- For an email change, both rows share a `change_id`. The BBS applies the new
+  address itself once both halves are marked consumed (checked at startup and on
+  each login), so the web front end does not write to the user table.
+- A password reset has to write `db_users.password_hash` in the format
+  `pbkdf2_sha256$<iterations>$<base64 salt>$<base64 digest>` (SHA-256, 200000
+  iterations). Alternatively, change that flow to a form the web BBS owns and
+  keep this repository's table untouched.
+
+`db_activations` holds the pending activation code hash for an account; it is
+only used by the SSH flow and the web BBS can ignore it.
 
 ## Operations
 

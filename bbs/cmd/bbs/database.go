@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -20,6 +22,7 @@ type dbUser struct {
 	FirstSeen    string
 	LastSeen     string
 	Registered   string
+	Activated    bool
 }
 
 type dbBulletin struct {
@@ -102,13 +105,41 @@ func openDatabase(path string) (*gorm.DB, error) {
 		return nil, err
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAuthFailure{}, &dbRegistration{}); err != nil {
+	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAuthFailure{}, &dbRegistration{}, &dbActivation{}, &dbToken{}, &dbSetting{}); err != nil {
 		return nil, err
 	}
 	if err := backfillRegistered(db); err != nil {
 		return nil, err
 	}
+	if err := backfillActivated(db); err != nil {
+		return nil, err
+	}
 	return db, nil
+}
+
+// backfillActivated marks every pre-existing account as activated, once.
+//
+// The column defaults to false, which is right for a new registration and wrong
+// for every account that existed before activation was introduced; without this
+// they would all be forced through an activation flow on their next login. A
+// marker row makes the update run exactly once, so a later deliberately
+// unactivated account is never flipped.
+func backfillActivated(db *gorm.DB) error {
+	const key = "migrated.activation"
+	marker := dbSetting{}
+	err := db.Where("key = ?", key).Take(&marker).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&dbUser{}).Where("activated = ?", false).UpdateColumn("activated", true).Error; err != nil {
+			return err
+		}
+		return tx.Create(&dbSetting{Key: key, Value: "1"}).Error
+	})
 }
 
 // backfillRegistered gives accounts created before the column existed a

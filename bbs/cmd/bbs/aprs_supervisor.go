@@ -113,6 +113,9 @@ func (a *app) rotateRuntimeLogsNightly() {
 		if err := a.pruneRegistrations(time.Now().UTC()); err != nil {
 			a.logAPRSReceiver("Registration throttle prune error: %v", err)
 		}
+		if err := a.pruneTokens(time.Now().UTC()); err != nil {
+			a.logAPRSReceiver("Account token prune error: %v", err)
+		}
 	}
 }
 

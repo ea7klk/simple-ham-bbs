@@ -84,14 +84,20 @@ func buttonLabelKey(button string) string {
 	switch button {
 	case "login":
 		return "login_button"
+	case "forgot":
+		return "forgot_button"
+	case "send":
+		return "send_button"
+	case "activate":
+		return "activate_button"
+	case "resend":
+		return "resend_button"
 	case "save":
 		return "save_button"
 	case "delete":
 		return "delete_button"
 	case "reply":
 		return "reply_button"
-	case "send":
-		return "send_button"
 	case "no":
 		return "no_label"
 	case "yes":

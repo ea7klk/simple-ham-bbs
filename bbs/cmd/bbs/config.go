@@ -77,6 +77,7 @@ type app struct {
 	currentUser         string
 	currentUserIsSysop  bool
 	terminalError       error
+	mail                *mailer
 	runMenuHook         func(lang, title, header string, opts []option) string
 	runFormHook         func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool)
 	showInfoHook        func(lang, title string, rows [][]string)
@@ -100,6 +101,9 @@ type userProfile struct {
 	// Registered is when the account was created. It is written once and never
 	// changes, unlike FirstSeen/LastSeen which track presence.
 	Registered string `json:"registered,omitempty"`
+	// Activated is false until the caller proves they can read the address they
+	// registered with. Accounts that predate activation are backfilled to true.
+	Activated bool `json:"activated,omitempty"`
 }
 
 type bulletin struct {
