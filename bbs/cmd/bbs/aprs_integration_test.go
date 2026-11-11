@@ -344,3 +344,68 @@ func TestAPRSLogRotationAndSupervisorHelpers(t *testing.T) {
 		t.Fatalf("copyLogAppend truncated offset=%d err=%v", offset, err)
 	}
 }
+
+// A bot command goes out as exactly one message, and one that does not fit is
+// refused rather than split — a split command arrives as "[1/2]" as the group.
+func TestAPRSCommandIsNeverSplit(t *testing.T) {
+	// The longest check-in that fits: prefix + space + text + "{XXXXX".
+	prefix := "CQ HOTG"
+	maxText := aprsCommandMaxBody - len([]rune(prefix)) - 1
+	body := prefix + " " + strings.Repeat("x", maxText)
+	if len([]rune(body))+aprsCommandIDReserve != aprsMessageLimit {
+		t.Fatalf("boundary maths wrong: body %d + id %d != %d",
+			len([]rune(body)), aprsCommandIDReserve, aprsMessageLimit)
+	}
+
+	packets := withFakeAPRSIS(t, 1)
+	a := testApp(t)
+	a.cfg.aprsServer = "127.0.0.1"
+	a.cfg.aprsPort = 14580
+	a.cfg.aprsLogFile = filepath.Join(t.TempDir(), "aprs.log")
+
+	sent, ok := a.sendAPRSCommand("EA7KLK", "ANSRVR", body, "en")
+	if !ok {
+		t.Fatalf("a command at the limit was refused: %#v", sent)
+	}
+	if len(sent.Parts) != 1 {
+		t.Fatalf("command sent as %d parts", len(sent.Parts))
+	}
+	got := <-packets
+	if len(got) != 2 {
+		t.Fatalf("packets = %#v", got)
+	}
+	if strings.Contains(got[1], "[1/") {
+		t.Fatalf("command was split: %q", got[1])
+	}
+	// The whole body must be present in one packet.
+	if !strings.Contains(got[1], `:ANSRVR   :CQ HOTG xxx`) {
+		t.Fatalf("packet = %q", got[1])
+	}
+
+	// One character more is refused, and nothing is transmitted.
+	packets = withFakeAPRSIS(t, 1)
+	tooLong := body + "y"
+	refused, ok := a.sendAPRSCommand("EA7KLK", "ANSRVR", tooLong, "en")
+	if ok {
+		t.Fatal("an over-long command was sent")
+	}
+	if refused.Status != aprsStatusFailed || len(refused.Parts) != 1 {
+		t.Fatalf("refusal = %#v", refused)
+	}
+	if !strings.Contains(refused.Parts[0].Detail, "single APRS message") {
+		t.Fatalf("refusal detail = %q", refused.Parts[0].Detail)
+	}
+	select {
+	case pkt := <-packets:
+		t.Fatalf("an over-long command reached the server: %#v", pkt)
+	default:
+	}
+}
+
+// Ordinary messages still split; only commands refuse.
+func TestOrdinaryMessagesStillSplit(t *testing.T) {
+	parts := splitAPRSMessage(strings.Repeat("word ", 40))
+	if len(parts) < 2 {
+		t.Fatalf("splitAPRSMessage returned %d parts for a long text", len(parts))
+	}
+}

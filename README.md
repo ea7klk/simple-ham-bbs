@@ -239,6 +239,22 @@ queued instead of dialled inline: the queue holds 64, sends at most one every
 ten seconds, and drops (with a logged count) when inbound traffic outruns that
 budget, so no third party can turn inbound packets into an outbound dial storm.
 
+### Net check-ins
+
+Two bot check-ins are available from the APRS menu. They are different things and
+are addressed differently, which is easy to get wrong:
+
+- **#APRSThursday** — `CQ HOTG <your text>` sent to **ANSRVR**, the group server.
+  `Leave` sends `U HOTG` to stop the group's traffic reaching your local network;
+  `Extend` sends `K HOTG`. Check-in is only offered on Thursdays.
+- **APRSPH** — `CQ <your text>` sent to the **bot at callsign APRSPH**. It is not
+  a group: sending it to ANSRVR joins a group named after the first word of your
+  message instead, which is what happened before this was corrected.
+
+These commands are sent as a single APRS message and are never split. A check-in
+too long for one message is refused with the limit shown, because a split command
+reaches the server as separate commands — `[1/2]` would be read as the group name.
+
 ### APRS bulletins
 
 Bulletins broadcast on APRS-IS are collected and can be read from

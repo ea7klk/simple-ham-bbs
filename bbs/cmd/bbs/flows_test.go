@@ -412,7 +412,8 @@ func TestAPRSMenusAndRows(t *testing.T) {
 	if err := a.replaceAllUsers(map[string]userProfile{"EA7KLK": {Language: "en", EnableAPRS: false}}); err != nil {
 		t.Fatal(err)
 	}
-	menuQueue := []string{"6", "q"}
+	// "8" is the APRS enable toggle now that leave and keepalive occupy 5 and 6.
+	menuQueue := []string{"8", "q"}
 	a.runMenuHook = func(lang, title, header string, opts []option) string {
 		next := menuQueue[0]
 		menuQueue = menuQueue[1:]
@@ -544,22 +545,56 @@ func TestAPRSEditableFlowsWithHooks(t *testing.T) {
 	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
 		return "send", map[string]string{"text": "Checking in"}, true
 	}
-	if !a.sendANSRVRMessage("EA7KLK", userProfile{EnableAPRS: true}, "en", "ANSRVR", "CQ") {
-		t.Fatal("sendANSRVRMessage returned false")
+	if !a.sendAPRSBotCommand("EA7KLK", userProfile{EnableAPRS: true}, "en", "aprs_join_aprsph", "APRSPH", "CQ", true) {
+		t.Fatal("APRSPH check-in returned false")
 	}
-	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], ":CQ Checking in{") {
-		t.Fatalf("ANSRVR packet=%#v", got)
+	// APRSPH is a bot at a callsign, so the packet must be addressed to it —
+	// not to ANSRVR, which would read "CQ" as a group name to join.
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], "::APRSPH   :CQ Checking in{") {
+		t.Fatalf("APRSPH packet=%#v", got)
 	}
 
 	packets = withFakeAPRSIS(t, 1)
 	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
 		return "send", map[string]string{"text": "Thursday check-in"}, true
 	}
-	if !a.sendANSRVRMessage("EA7KLK", userProfile{EnableAPRS: true}, "en", "APRSThursday", "CQ HOTG") {
-		t.Fatal("sendANSRVRMessage returned false for APRSThursday")
+	if !a.sendAPRSBotCommand("EA7KLK", userProfile{EnableAPRS: true}, "en", "aprs_join_aprs_thursday", "ANSRVR", "CQ HOTG", true) {
+		t.Fatal("APRSThursday check-in returned false")
 	}
-	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], ":CQ HOTG Thursday check-in{") {
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], "::ANSRVR   :CQ HOTG Thursday check-in{") {
 		t.Fatalf("APRSThursday ANSRVR packet=%#v", got)
+	}
+
+	// Leaving sends "U HOTG" to ANSRVR, with no message text.
+	packets = withFakeAPRSIS(t, 1)
+	if !a.sendAPRSBotCommand("EA7KLK", userProfile{EnableAPRS: true}, "en", "aprs_leave_aprs_thursday", "ANSRVR", "U HOTG", false) {
+		t.Fatal("leave returned false")
+	}
+	if got := <-packets; len(got) != 2 || !strings.Contains(got[1], "::ANSRVR   :U HOTG{") {
+		t.Fatalf("leave packet=%#v", got)
+	}
+
+	// A command too long for one message is refused, not split: a split command
+	// reaches the group server with "[1/2]" as the group name.
+	packets = withFakeAPRSIS(t, 1)
+	a.runFormHook = func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+		return "send", map[string]string{"text": strings.Repeat("x", 120)}, true
+	}
+	refusals := 0
+	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string {
+		refusals++
+		return "q"
+	}
+	if a.sendAPRSBotCommand("EA7KLK", userProfile{EnableAPRS: true}, "en", "aprs_join_aprs_thursday", "ANSRVR", "CQ HOTG", true) {
+		t.Fatal("an over-long command was sent")
+	}
+	select {
+	case pkt := <-packets:
+		t.Fatalf("an over-long command reached APRS-IS: %#v", pkt)
+	default:
+	}
+	if refusals == 0 {
+		t.Fatal("no refusal was shown to the user")
 	}
 
 	sentRows := a.loadSentHistory("EA7KLK")

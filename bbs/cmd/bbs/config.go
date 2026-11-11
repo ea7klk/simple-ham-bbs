@@ -8,9 +8,16 @@ import (
 )
 
 const (
-	defaultBoardID              = "general"
-	passwordIterations          = 200000
-	aprsMessageLimit            = 67
+	defaultBoardID     = "general"
+	passwordIterations = 200000
+	aprsMessageLimit   = 67
+	// aprsCommandIDReserve is the space the trailing {XXXXX message ID takes
+	// inside the 67-character APRS message field, so a one-message command body
+	// is limited to the remainder.
+	aprsCommandIDReserve = 6
+	// aprsCommandMaxBody is the longest body a bot command may carry and still
+	// fit in a single APRS message.
+	aprsCommandMaxBody          = aprsMessageLimit - aprsCommandIDReserve
 	sentHistoryLimit            = 200
 	receivedHistoryLimit        = 500
 	aprsReceiverRestartInterval = time.Hour

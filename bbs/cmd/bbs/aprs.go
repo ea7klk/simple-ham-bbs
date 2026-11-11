@@ -37,9 +37,11 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 			{"2", a.t(lang, "aprs_sent_messages")},
 			{"3", a.t(lang, "aprs_send_message")},
 			{"4", a.t(lang, "aprs_join_aprs_thursday")},
-			{"5", a.t(lang, "aprs_join_aprsph")},
-			{"6", a.t(lang, "aprs_set_enabled")},
-			{"7", a.t(lang, "aprs_bulletins_menu")},
+			{"5", a.t(lang, "aprs_leave_aprs_thursday")},
+			{"6", a.t(lang, "aprs_keepalive_aprs_thursday")},
+			{"7", a.t(lang, "aprs_join_aprsph")},
+			{"8", a.t(lang, "aprs_set_enabled")},
+			{"9", a.t(lang, "aprs_bulletins_menu")},
 			{"q", a.t(lang, "menu_quit")},
 		})
 		switch choice {
@@ -52,10 +54,14 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 		case "4":
 			a.joinAPRSThursday(callsign, profile, lang)
 		case "5":
-			a.joinAPRSPH(callsign, profile, lang)
-		case "7":
-			a.showAPRSBulletinCategories(lang)
+			a.leaveAPRSThursday(callsign, profile, lang)
 		case "6":
+			a.keepaliveAPRSThursday(callsign, profile, lang)
+		case "7":
+			a.joinAPRSPH(callsign, profile, lang)
+		case "9":
+			a.showAPRSBulletinCategories(lang)
+		case "8":
 			_, values, ok := a.runForm(lang, a.t(lang, "aprs_enable_title"), []formField{{name: "enable_aprs", label: a.t(lang, "enable_aprs"), kind: fieldChoice, value: boolString(profile.EnableAPRS), choices: []option{{"false", "false"}, {"true", "true"}}}}, []string{"save", "cancel"})
 			if ok {
 				profile.EnableAPRS = values["enable_aprs"] == "true"
@@ -158,33 +164,105 @@ func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destinati
 	}
 }
 
+// destination constants for the two APRS bots this menu talks to.
+//
+// APRSPH is a bot at the callsign APRSPH, not a group: it is addressed directly
+// and answers every message. ANSRVR is the group server, addressed with a
+// command in the text ("CQ <group>", "U <group>", "K <group>").
+const (
+	aprsBotAPRSPH = "APRSPH"
+	aprsBotANSRVR = "ANSRVR"
+	aprsGroupHOTG = "HOTG"
+	aprsCommandCQ = "CQ"
+	aprsCommandU  = "U"
+	aprsCommandK  = "K"
+	aprsHOTGJoin  = aprsCommandCQ + " " + aprsGroupHOTG
+	aprsHOTGLeave = aprsCommandU + " " + aprsGroupHOTG
+	aprsHOTGKeep  = aprsCommandK + " " + aprsGroupHOTG
+	aprsAPRSPHCQ  = aprsCommandCQ
+)
+
+// joinAPRSThursday checks in to the #APRSThursday net: "CQ HOTG <text>" to the
+// ANSRVR group server.
 func (a *app) joinAPRSThursday(callsign string, profile userProfile, lang string) {
 	if time.Now().UTC().Weekday() != time.Thursday {
-		a.showInfoActions(lang, a.t(lang, "aprs_join_aprs_thursday"), [][]string{{a.t(lang, "aprs_not_thursday_warning")}}, []option{{"q", a.t(lang, "back_button")}})
+		a.showInfoActions(lang, a.t(lang, "aprs_join_aprs_thursday"),
+			[][]string{{a.t(lang, "aprs_not_thursday_warning")}},
+			[]option{{"q", a.t(lang, "back_button")}})
 		return
 	}
-	a.sendANSRVRMessage(callsign, profile, lang, a.t(lang, "aprs_join_aprs_thursday"), "CQ HOTG")
+	a.sendAPRSBotCommand(callsign, profile, lang, "aprs_join_aprs_thursday", aprsBotANSRVR, aprsHOTGJoin, true)
 }
 
+// leaveAPRSThursday unsubscribes from the HOTG group: "U HOTG" to ANSRVR.
+//
+// #APRSThursday asks participants to leave when they stop, so their local RF
+// network is not kept busy by the group's traffic. Not gated on the weekday: you
+// may want to leave any day.
+func (a *app) leaveAPRSThursday(callsign string, profile userProfile, lang string) {
+	if !profile.EnableAPRS {
+		a.showInfo(lang, a.t(lang, "aprs_leave_aprs_thursday"), [][]string{{a.t(lang, "aprs_enable_required")}})
+		return
+	}
+	if !a.confirmDelete(lang, a.t(lang, "aprs_leave_confirm")) {
+		return
+	}
+	a.sendAPRSBotCommand(callsign, profile, lang, "aprs_leave_aprs_thursday", aprsBotANSRVR, aprsHOTGLeave, false)
+}
+
+// keepaliveAPRSThursday extends the HOTG subscription: "K HOTG" to ANSRVR.
+func (a *app) keepaliveAPRSThursday(callsign string, profile userProfile, lang string) {
+	a.sendAPRSBotCommand(callsign, profile, lang, "aprs_keepalive_aprs_thursday", aprsBotANSRVR, aprsHOTGKeep, false)
+}
+
+// joinAPRSPH checks in to the APRSPH net: "CQ <text>" to the APRSPH bot.
+//
+// The destination is the bot's callsign. Sending this to ANSRVR instead joins a
+// group named after the first word of the text, which is what used to happen.
 func (a *app) joinAPRSPH(callsign string, profile userProfile, lang string) {
-	a.sendANSRVRMessage(callsign, profile, lang, a.t(lang, "aprs_join_aprsph"), "CQ")
+	a.sendAPRSBotCommand(callsign, profile, lang, "aprs_join_aprsph", aprsBotAPRSPH, aprsAPRSPHCQ, true)
 }
 
-func (a *app) sendANSRVRMessage(callsign string, profile userProfile, lang, title, prefix string) bool {
+// sendAPRSBotCommand sends one bot command, optionally with the user's text
+// appended to a fixed prefix.
+//
+// The command is sent as a single APRS message: splitting would put the command
+// into part one with a "[1/2] " prefix and the rest into part two, so neither
+// part would be a valid command.
+func (a *app) sendAPRSBotCommand(callsign string, profile userProfile, lang, titleKey, destination, prefix string, askText bool) bool {
+	title := a.t(lang, titleKey)
 	for {
 		if !profile.EnableAPRS {
 			a.showInfo(lang, title, [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return false
 		}
-		action, values, ok := a.runForm(lang, title, []formField{
-			{name: "text", label: a.t(lang, "aprs_ansrvr_text"), kind: fieldTextArea, required: true, limit: 1900},
-		}, []string{"send", "cancel"})
-		if !ok || action == "cancel" {
-			return false
+
+		text := prefix
+		if askText {
+			// The prefix and the trailing message ID both consume space in the
+			// 67-character field; what is left is the user's budget.
+			maxText := aprsCommandMaxBody - len([]rune(prefix)) - 1
+			if maxText < 10 {
+				maxText = 10
+			}
+			invalidText := a.aprsCommandTooLongDetail(lang, maxText, maxText)
+			action, values, ok := a.runForm(lang, title, []formField{
+				{
+					name: "text", label: a.t(lang, "aprs_ansrvr_text"), kind: fieldTextArea, required: true,
+					validator:   func(v string) bool { return len([]rune(v)) <= maxText },
+					invalidText: invalidText,
+				},
+			}, []string{"send", "cancel"})
+			if !ok || action == "cancel" {
+				return false
+			}
+			text = prefix + " " + strings.TrimSpace(values["text"])
 		}
-		text := prefix + " " + strings.TrimSpace(values["text"])
-		a.showSendingAPRS(lang, "ANSRVR")
-		sent, okSend := a.sendAPRSMessage(callsign, "ANSRVR", text, lang)
+
+		// Say where it is going: the two bots are easy to confuse, and the
+		// difference is exactly what used to break this.
+		a.showSendingAPRS(lang, destination)
+		sent, okSend := a.sendAPRSCommand(callsign, destination, text, lang)
 		if !okSend {
 			detail := ""
 			if len(sent.Parts) > 0 {
@@ -200,7 +278,7 @@ func (a *app) sendANSRVRMessage(callsign string, profile userProfile, lang, titl
 			return false
 		}
 		_ = a.addSent(callsign, sent)
-		a.logBBSAction(callsign, "aprs_send", "to=%q parts=%d", sent.To, len(sent.Parts))
+		a.logBBSAction(callsign, "aprs_send", "to=%q parts=%d command=%q", sent.To, len(sent.Parts), prefix)
 		a.showInfoActions(lang, a.t(lang, "aprs_send_success"), a.aprsSentResultRows(lang, sent), []option{{"o", a.t(lang, "ok_button")}})
 		return true
 	}
@@ -607,6 +685,50 @@ func (a *app) trimReceivedRows(callsign string) error {
 }
 
 func (a *app) sendAPRSMessage(source, destination, text, lang string) (sentAPRS, bool) {
+	// Ordinary messages are split across as many APRS messages as needed.
+	return a.sendAPRSMessageParts(source, destination, text, splitAPRSMessage(text), lang)
+}
+
+// aprsCommandTooLongDetail renders the over-length refusal.
+//
+// It formats a translated template, but falls back to English when the key is
+// missing: a bare key reaching fmt.Sprintf with two arguments produces
+// "aprs_command_too_long%!(EXTRA int=...)", which is worse than a plain sentence.
+func (a *app) aprsCommandTooLongDetail(lang string, max, got int) string {
+	const key = "aprs_command_too_long"
+	tmpl := a.t(lang, key)
+	if tmpl == key {
+		tmpl = "Too long for a single APRS message: at most %d characters here (yours is %d). A command is never split."
+	}
+	return fmt.Sprintf(tmpl, max, got)
+}
+
+// sendAPRSCommand sends text as exactly one APRS message.
+//
+// Bot commands must not be split. The splitter prefixes every part with
+// "[n/total] ", so a two-part "CQ HOTG ..." puts the command in part one as
+// group "[1/2]" and the rest of the text in part two as group "[2/2]" — the
+// command never reaches the group it names. A command that does not fit is
+// refused instead, which the caller reports to the user.
+func (a *app) sendAPRSCommand(source, destination, text, lang string) (sentAPRS, bool) {
+	body := cleanAPRSBody(text)
+	if len([]rune(body)) > aprsCommandMaxBody {
+		return sentAPRS{
+			At:     now(),
+			Status: aprsStatusFailed,
+			Text:   body,
+			Parts: []sentAPRSPart{{
+				Number: 1,
+				Status: aprsStatusFailed,
+				Detail: a.aprsCommandTooLongDetail(lang, aprsCommandMaxBody, len([]rune(body))),
+			}},
+		}, false
+	}
+	return a.sendAPRSMessageParts(source, destination, text, []string{body}, lang)
+}
+
+// sendAPRSMessageParts is the shared send path: validate, number the parts, send.
+func (a *app) sendAPRSMessageParts(source, destination, text string, parts []string, lang string) (sentAPRS, bool) {
 	if !validAPRSCallsign(source) {
 		return sentAPRS{At: now(), Status: aprsStatusFailed, Parts: []sentAPRSPart{{Number: 1, Status: aprsStatusFailed, Detail: a.t(lang, "aprs_invalid_source")}}}, false
 	}
@@ -616,7 +738,6 @@ func (a *app) sendAPRSMessage(source, destination, text, lang string) (sentAPRS,
 	from := aprsSSID0(source)
 	to := normalizeAPRSCallsign(destination)
 	passcode := aprsPasscode(from)
-	parts := splitAPRSMessage(text)
 	sent := sentAPRS{At: now(), From: from, To: to, Text: cleanAPRSBody(text), Status: aprsStatusSent, Passcode: passcode}
 	messageIDs := aprsMessageIDs(from, to, len(parts), time.Now())
 	sentParts, allOK := a.sendAPRSParts(from, passcode, to, parts, messageIDs)

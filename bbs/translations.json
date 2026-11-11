@@ -232,7 +232,11 @@
     "aprs_bulletin_desc_organisation": "Verbandsmeldungen, Regeländerungen und Mitgliederhinweise",
     "aprs_bulletin_desc_test": "Test-Bulletins",
     "aprs_bulletin_desc_general": "Nicht kategorisierte Bulletins",
-    "aprs_bulletin_desc_other": "Eine dieser BBS unbekannte Gruppe; die Rohgruppe wird angezeigt"
+    "aprs_bulletin_desc_other": "Eine dieser BBS unbekannte Gruppe; die Rohgruppe wird angezeigt",
+    "aprs_leave_aprs_thursday": "#APRSThursday-Gruppe verlassen",
+    "aprs_keepalive_aprs_thursday": "#APRSThursday-Abo verlängern",
+    "aprs_leave_confirm": "Gruppe verlassen? Deine Station erhält dann keinen Verkehr mehr, was das lokale APRS-Netz entlastet.",
+    "aprs_command_too_long": "Zu lang für eine einzelne APRS-Nachricht: hier höchstens %d Zeichen (deine hat %d). Ein Befehl wird nie aufgeteilt, da die Teile sonst als getrennte Befehle ankommen."
   },
   "en": {
     "about_graphics": "Graphics: plain ANSI text, suitable for simple terminals.",
@@ -467,7 +471,11 @@
     "aprs_bulletin_desc_organisation": "Society bulletins, rule changes and membership notices",
     "aprs_bulletin_desc_test": "Test bulletins",
     "aprs_bulletin_desc_general": "Uncategorised bulletins",
-    "aprs_bulletin_desc_other": "A group this BBS does not recognise; the raw group is shown"
+    "aprs_bulletin_desc_other": "A group this BBS does not recognise; the raw group is shown",
+    "aprs_leave_aprs_thursday": "Leave the #APRSThursday group",
+    "aprs_keepalive_aprs_thursday": "Extend the #APRSThursday subscription",
+    "aprs_leave_confirm": "Leave the group? Your station stops receiving its traffic, which relieves your local APRS network.",
+    "aprs_command_too_long": "Too long for a single APRS message: at most %d characters here (yours is %d). A command is never split, because the parts would reach the group server as separate commands."
   },
   "es": {
     "about_graphics": "Gráficos: texto ANSI simple, apto para terminales sencillos.",
@@ -702,7 +710,11 @@
     "aprs_bulletin_desc_organisation": "Boletines de asociaciones y cambios de normas",
     "aprs_bulletin_desc_test": "Boletines de prueba",
     "aprs_bulletin_desc_general": "Boletines sin categoría",
-    "aprs_bulletin_desc_other": "Un grupo que esta BBS no reconoce; se muestra el grupo original"
+    "aprs_bulletin_desc_other": "Un grupo que esta BBS no reconoce; se muestra el grupo original",
+    "aprs_leave_aprs_thursday": "Salir del grupo #APRSThursday",
+    "aprs_keepalive_aprs_thursday": "Ampliar la suscripción #APRSThursday",
+    "aprs_leave_confirm": "¿Salir del grupo? Tu estación dejará de recibir su tráfico, lo que alivia la red APRS local.",
+    "aprs_command_too_long": "Demasiado largo para un solo mensaje APRS: como máximo %d caracteres aquí (el tuyo tiene %d). Un comando nunca se divide, porque las partes llegarían como comandos separados."
   },
   "fr": {
     "about_graphics": "Graphismes : texte ANSI simple, adapté aux terminaux simples.",
@@ -937,6 +949,10 @@
     "aprs_bulletin_desc_organisation": "Communiqués, changements de règles et adhésions",
     "aprs_bulletin_desc_test": "Bulletins de test",
     "aprs_bulletin_desc_general": "Bulletins sans catégorie",
-    "aprs_bulletin_desc_other": "Groupe inconnu de cette BBS ; le groupe brut est affiché"
+    "aprs_bulletin_desc_other": "Groupe inconnu de cette BBS ; le groupe brut est affiché",
+    "aprs_leave_aprs_thursday": "Quitter le groupe #APRSThursday",
+    "aprs_keepalive_aprs_thursday": "Prolonger l’abonnement #APRSThursday",
+    "aprs_leave_confirm": "Quitter le groupe ? Votre station ne recevra plus ce trafic, ce qui soulage le réseau APRS local.",
+    "aprs_command_too_long": "Trop long pour un seul message APRS : %d caractères maximum ici (le vôtre en fait %d). Une commande n’est jamais découpée, sinon les parties arriveraient comme des commandes distinctes."
   }
 }
