@@ -281,12 +281,14 @@ func (a *app) storeReceivedAPRS(msg receivedAPRS) (string, bool, error) {
 	if isAPRSAckMessage(msg.Text) {
 		return aprsRecipientKey(msg.To), false, nil
 	}
-	users, err := a.loadUsers()
+	// One indexed read, not the whole user table. This runs per inbound packet,
+	// so a full scan here capped the receiver at roughly six packets a second at
+	// ten thousand users (SCALABILITY.md).
+	key := aprsRecipientKey(msg.To)
+	profile, ok, err := a.loadUser(key)
 	if err != nil {
 		return "", false, err
 	}
-	key := aprsRecipientKey(msg.To)
-	profile, ok := users[key]
 	if !ok || profile.Disabled || !profile.EnableAPRS {
 		return key, false, nil
 	}
@@ -304,22 +306,20 @@ func (a *app) storeReceivedAPRS(msg receivedAPRS) (string, bool, error) {
 }
 
 func (a *app) aprsRecipientEnabled(to string) (string, bool, error) {
-	users, err := a.loadUsers()
+	key := aprsRecipientKey(to)
+	profile, ok, err := a.loadUser(key)
 	if err != nil {
 		return "", false, err
 	}
-	key := aprsRecipientKey(to)
-	profile, ok := users[key]
 	return key, ok && !profile.Disabled && profile.EnableAPRS, nil
 }
 
 func (a *app) aprsRecipientExists(to string) (string, bool, error) {
-	users, err := a.loadUsers()
+	key := aprsRecipientKey(to)
+	_, ok, err := a.loadUser(key)
 	if err != nil {
 		return "", false, err
 	}
-	key := aprsRecipientKey(to)
-	_, ok := users[key]
 	return key, ok, nil
 }
 
