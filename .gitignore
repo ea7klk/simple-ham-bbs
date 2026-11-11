@@ -6,3 +6,6 @@ ssh/host_keys/
 *.log
 __pycache__/
 .DS_Store
+
+# In-tree build output from `go build ./...` inside bbs/.
+bbs/bbs
