@@ -296,7 +296,7 @@ it, so a placeholder can be committed without weakening anything:
   placeholder. `bbs-env` is not managed by Fleet, so the real password is never
   committed and never reverted by drift correction.
 
-To turn mail on, set the real Mailcow password in the `bbs-env` Secret — in
+To turn mail on, add `BBS_SMTP_PASSWORD` to the **`bbs-env`** Secret — in
 Rancher under **Storage → Secrets → `bbs-env`** (that form holds base64 values,
 so paste `printf '%s' '<password>' | base64 -w0` unless it offers plain-text
 entry), or from a shell where the value is plaintext:
@@ -313,9 +313,15 @@ Then restart the Deployment so the entrypoint re-reads the environment.
 again, remove the key (`patch` with `"BBS_SMTP_PASSWORD":null`) or blank it;
 either leaves the app with no usable password and it stays off.
 
-Do **not** set the password on the `bbs-smtp` Secret: Fleet owns it, so the edit
-would be reverted on the next sync. Only non-secret settings belong there, and
-they are changed in `spainip/infra`, not in the cluster.
+`bbs-smtp` holds only the non-secret settings, and it is owned by Fleet: an edit
+to it — a password included — is reverted within seconds, which is why
+`BBS_SMTP_PASSWORD` does not exist there at all. `bbs-env` is read after
+`bbs-smtp`, so anything you put there wins. Change host, port or sender in
+`spainip/infra`; change only the password in the cluster.
+
+Both steps are needed: the Secret holds the value, and the Deployment only reads
+its environment at container start, so a restart is what makes a new password
+take effect.
 
 Messages are sent in the user's language (English, German, Spanish, French) and
 contain a plain-text link, never an HTML body. Sending is synchronous with a 20 s
