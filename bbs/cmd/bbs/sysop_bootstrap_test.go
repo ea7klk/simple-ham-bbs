@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -273,5 +276,85 @@ func TestStaleSnapshotDoesNotBootstrapOverStoredSysop(t *testing.T) {
 	}
 	if changed := a.applyConfiguredSysops(stale); len(changed) != 0 {
 		t.Fatalf("stale snapshot bootstrapped %v over a stored sysop", changed)
+	}
+}
+
+// A sysop session is marked on every screen, not only on the main menu.
+func TestBannerMarksSysopSessions(t *testing.T) {
+	a := testApp(t)
+	a.text = map[string]map[string]any{"en": {
+		"current_user_label": "User",
+		"sysop_role":         "Sysop",
+	}}
+	a.cfg.name = "HAMNET RADIO BBS"
+	a.cfg.location = "HamNet"
+	a.cfg.topic = "Tests"
+	a.currentUser = "EA7KLK"
+
+	a.currentUserIsSysop = false
+	plain := a.banner("en")
+	if strings.Contains(plain, "Sysop") {
+		t.Fatalf("non-sysop banner carries the role marker: %q", plain)
+	}
+
+	a.currentUserIsSysop = true
+	marked := a.banner("en")
+	if !strings.Contains(marked, "EA7KLK") || !strings.Contains(marked, "Sysop") {
+		t.Fatalf("sysop banner missing the role marker: %q", marked)
+	}
+}
+
+// An operator who configures BBS_SYSOPS but never logs in with it has no sysop;
+// startup records that state instead of leaving it invisible.
+func TestBootstrapSysopStateIsReported(t *testing.T) {
+	a := testApp(t)
+	a.cfg.sysops = map[string]bool{"EA7KLK": true}
+	a.cfg.bbsLogFile = t.TempDir() + "/bbs.log"
+
+	// No account at all: the grant is still available.
+	a.reportBootstrapSysopState()
+	body, err := os.ReadFile(a.cfg.bbsLogFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "sysop_bootstrap_unclaimed") {
+		t.Fatalf("missing unclaimed warning: %q", body)
+	}
+
+	// Account exists but has not logged in yet: the role arrives on next login.
+	if err := a.saveUser("EA7KLK", userProfile{FullName: "Volker", Language: "en"}); err != nil {
+		t.Fatal(err)
+	}
+	a.reportBootstrapSysopState()
+	body, _ = os.ReadFile(a.cfg.bbsLogFile)
+	if !strings.Contains(string(body), "sysop_bootstrap_pending") {
+		t.Fatalf("missing pending warning: %q", body)
+	}
+
+	// A real sysop silences the warning.
+	if err := a.saveUser("EA7KLK", userProfile{FullName: "Volker", Language: "en", IsSysop: true}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(body)
+	a.reportBootstrapSysopState()
+	body, _ = os.ReadFile(a.cfg.bbsLogFile)
+	if len(body) != before {
+		t.Fatalf("warning logged even though a sysop exists: %q", body)
+	}
+}
+
+// An invalid BBS_SYSOPS entry fails startup instead of silently granting
+// nothing.
+func TestInvalidSysopsFailStartup(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BBS_DATA_DIR", dir)
+	t.Setenv("BBS_DB_FILE", filepath.Join(dir, "bbs.sqlite"))
+	t.Setenv("BBS_TRANSLATIONS_FILE", filepath.Join(dir, "missing.json"))
+	t.Setenv("BBS_SYSOPS", "EA7KLK,not a callsign")
+
+	if _, err := newApp(); err == nil {
+		t.Fatal("newApp() accepted an invalid BBS_SYSOPS entry")
+	} else if !strings.Contains(err.Error(), "NOT A CALLSIGN") {
+		t.Fatalf("startup error does not name the bad entry: %v", err)
 	}
 }

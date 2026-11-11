@@ -75,6 +75,7 @@ type app struct {
 	text                map[string]map[string]any
 	db                  *gorm.DB
 	currentUser         string
+	currentUserIsSysop  bool
 	runMenuHook         func(lang, title, header string, opts []option) string
 	runFormHook         func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool)
 	showInfoHook        func(lang, title string, rows [][]string)

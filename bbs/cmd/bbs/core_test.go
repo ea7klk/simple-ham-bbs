@@ -16,9 +16,14 @@ func TestAppHelpersAndSeedData(t *testing.T) {
 	if got := env("BBS_MISSING_ENV", "fallback"); got != "fallback" {
 		t.Fatalf("env(fallback) = %q", got)
 	}
-	sysops := parseSysops(" ea7klk,EA1ABC,,ea7klk ")
-	if !sysops["EA7KLK"] || !sysops["EA1ABC"] || len(sysops) != 2 {
-		t.Fatalf("parseSysops() = %#v", sysops)
+	sysops, sysopErr := parseSysops(" ea7klk,EA1ABC,,ea7klk ")
+	if sysopErr != nil || !sysops["EA7KLK"] || !sysops["EA1ABC"] || len(sysops) != 2 {
+		t.Fatalf("parseSysops() = %#v, %v", sysops, sysopErr)
+	}
+	if _, err := parseSysops("EA7KLK, not a callsign, DL1ABC"); err == nil {
+		t.Fatal("parseSysops accepted an invalid callsign")
+	} else if !strings.Contains(err.Error(), "NOT A CALLSIGN") {
+		t.Fatalf("parseSysops error does not name the entry: %v", err)
 	}
 
 	a := testApp(t)

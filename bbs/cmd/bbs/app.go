@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,10 @@ import (
 func newApp() (*app, error) {
 	dataDir := env("BBS_DATA_DIR", "/var/lib/bbs")
 	port, _ := strconv.Atoi(env("APRS_IS_PORT", "14580"))
+	sysops, err := parseSysops(os.Getenv("BBS_SYSOPS"))
+	if err != nil {
+		return nil, err
+	}
 	cfg := config{
 		dataDir:              dataDir,
 		dbFile:               env("BBS_DB_FILE", filepath.Join(dataDir, "bbs.sqlite")),
@@ -23,7 +28,7 @@ func newApp() (*app, error) {
 		transFile:            env("BBS_TRANSLATIONS_FILE", "/usr/local/bin/translations.json"),
 		name:                 env("BBS_NAME", "HAMNET RADIO BBS"),
 		sysopName:            env("BBS_SYSOP", "Sysop"),
-		sysops:               parseSysops(os.Getenv("BBS_SYSOPS")),
+		sysops:               sysops,
 		location:             env("BBS_LOCATION", "HamNet"),
 		topic:                env("BBS_WELCOME_TOPIC", "Amateur radio notes, local nets, and packet-era experiments"),
 		aprsServer:           env("APRS_IS_SERVER", "rotate.aprs2.net"),
@@ -59,15 +64,30 @@ func env(name, fallback string) string {
 	return fallback
 }
 
-func parseSysops(raw string) map[string]bool {
+// parseSysops returns the configured bootstrap sysops and rejects entries that
+// are not callsigns.
+//
+// A typo used to be accepted, normalised, and then silently never match, so an
+// operator could believe they had a sysop when the variable granted nothing.
+// Failing here turns that into a startup error naming the offending entries.
+func parseSysops(raw string) (map[string]bool, error) {
 	sysops := map[string]bool{}
+	invalid := []string{}
 	for _, item := range strings.Split(raw, ",") {
 		item = normalizeCallsign(item)
-		if item != "" {
-			sysops[item] = true
+		if item == "" {
+			continue
 		}
+		if !callsignRE.MatchString(item) {
+			invalid = append(invalid, item)
+			continue
+		}
+		sysops[item] = true
 	}
-	return sysops
+	if len(invalid) > 0 {
+		return nil, fmt.Errorf("BBS_SYSOPS contains %d invalid callsign(s): %s (expected something like EA7KLK)", len(invalid), strings.Join(invalid, ", "))
+	}
+	return sysops, nil
 }
 
 func (a *app) t(lang, key string) string {
@@ -106,6 +126,11 @@ func (a *app) banner(lang string) string {
 	line := a.cfg.name
 	if a.currentUser != "" {
 		userText := fmt.Sprintf("%s: %s", a.t(lang, "current_user_label"), a.currentUser)
+		if a.currentUserIsSysop {
+			// Marked on every screen, not just the main menu: a sysop should
+			// never have to remember which session they are in.
+			userText += " [" + a.t(lang, "sysop_role") + "]"
+		}
 		userWidth := lipgloss.Width(userText)
 		titleWidth := panelContentWidth - userWidth - 1
 		if titleWidth < 1 {
@@ -131,7 +156,40 @@ func (a *app) seedData() error {
 	if err := a.seedDefaultData(); err != nil {
 		return err
 	}
+	a.reportBootstrapSysopState()
 	return a.normalizeReceivedAPRSStore()
+}
+
+// reportBootstrapSysopState records whether the configured bootstrap sysops are
+// still waiting for an account.
+//
+// Since BBS_SYSOPS became a bootstrap-only grant, an operator who sets it and
+// never logs in with one of those callsigns has no sysop at all — and nothing
+// on screen would say so. This puts the state in the log once per process.
+func (a *app) reportBootstrapSysopState() {
+	if len(a.cfg.sysops) == 0 {
+		return
+	}
+	users, err := a.loadUsers()
+	if err != nil {
+		a.logBBSAction("", "sysop_bootstrap_unknown", "error=%q", err.Error())
+		return
+	}
+	if hasActiveSysop(users) {
+		return
+	}
+	claimed := []string{}
+	for callsign := range a.cfg.sysops {
+		if _, ok := users[callsign]; ok {
+			claimed = append(claimed, callsign)
+		}
+	}
+	sort.Strings(claimed)
+	if len(claimed) > 0 {
+		a.logBBSAction("", "sysop_bootstrap_pending", "callsigns=%q note=%q", strings.Join(claimed, ","), "account exists but the sysop role is not granted until the next login")
+		return
+	}
+	a.logBBSAction("", "sysop_bootstrap_unclaimed", "configured=%d note=%q", len(a.cfg.sysops), "no account holds the sysop role; the first listed callsign to log in is granted it")
 }
 
 func (a *app) run() error {
@@ -147,14 +205,12 @@ func (a *app) run() error {
 		lang = "en"
 	}
 	a.currentUser = callsign
-	a.logBBSAction(callsign, "login", "sysop=%t", a.isSysop(profile))
+	a.currentUserIsSysop = a.isSysop(profile)
+	a.logBBSAction(callsign, "login", "sysop=%t", a.currentUserIsSysop)
 	a.sendLoginAPRSBeacon(callsign, profile)
 	for {
-		header := fmt.Sprintf("%s %s", a.t(lang, "logged_in_as"), callsign)
-		if a.isSysop(profile) {
-			header += " [" + a.t(lang, "sysop_role") + "]"
-		}
-		header += "    " + a.t(lang, "sysop") + ": " + a.cfg.sysopName
+		// The role marker lives in the banner, which every screen renders.
+		header := fmt.Sprintf("%s %s    %s: %s", a.t(lang, "logged_in_as"), callsign, a.t(lang, "sysop"), a.cfg.sysopName)
 		opts := []option{
 			{"1", a.t(lang, "menu_bulletins")},
 			{"2", a.t(lang, "menu_messages")},
@@ -179,6 +235,7 @@ func (a *app) run() error {
 		case "4":
 			profile = a.changeProfile(callsign, profile, lang)
 			lang = profile.Language
+			a.currentUserIsSysop = a.isSysop(profile)
 		case "5":
 			a.radioResources(lang)
 		case "6":

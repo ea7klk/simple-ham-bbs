@@ -819,10 +819,37 @@ thread.
   Tests: `readJSON` returns an error naming the file for malformed input and
   still fills the fallback, and an end-to-end `newApp()` run against a corrupt
   file starts successfully and leaves the log line.
-- **L8. `parseSysops` does not validate** (`app.go:49-56`): a typo in
-  `BBS_SYSOPS` is accepted, normalised, and then simply never matches — meaning
-  an operator can believe they have a sysop when they do not. Validate against
-  `callsignRE` at startup and fail loudly.
+- **L8. `parseSysops` did not validate — FIXED, plus a sysop marker on screen.**
+  A typo in `BBS_SYSOPS` was accepted, normalised, and then simply never
+  matched, so an operator could believe they had a sysop when they did not.
+
+  Three changes:
+
+  - `parseSysops` (`app.go`) validates every entry against `callsignRE` and
+    returns an error naming the offending entries, so `newApp` fails at startup
+    with `BBS_SYSOPS contains N invalid callsign(s): …`. Empty entries are still
+    ignored, which is what an unset variable looks like.
+  - `newApp` parses before building the config, so a bad value stops the process
+    instead of producing a half-configured app.
+  - Since H1 made `BBS_SYSOPS` bootstrap-only, an operator who configures it and
+    never logs in with one of those callsigns has no sysop at all — and nothing
+    said so. `reportBootstrapSysopState` (`app.go`, called from `seedData` once
+    per process) logs one of `sysop_bootstrap_unclaimed` (no account holds the
+    role; the first listed callsign to log in is granted it) or
+    `sysop_bootstrap_pending` (an account exists, role arrives on next login),
+    and stays silent once a sysop is active.
+
+  **Sysop marker in the screens.** The role is now in the banner, which every
+  screen renders, instead of only the main-menu header: `app.currentUserIsSysop`
+  is set at login and refreshed on a profile change, and `banner()` appends
+  `[Sysop]` to the current-user line. A sysop therefore cannot mistake which
+  session they are in — the distinction matters because the sysop menu mutates
+  other people's accounts.
+
+  Tests: `parseSysops` rejects and names a bad entry; `newApp` refuses to start
+  on one; the banner carries the marker only for a sysop session; and the
+  bootstrap-state reporter logs unclaimed, pending, and nothing once a sysop
+  exists.
 - **L9. Watchdog cannot recover a wedged child.** `watchAPRSReceiver()`
   (`aprs_supervisor.go:52-77`) starts the receiver and blocks in `Wait()` with
   no timeout or kill path. The receiver's own hourly restart usually saves it,
