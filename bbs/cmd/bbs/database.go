@@ -10,9 +10,12 @@ import (
 )
 
 type dbUser struct {
-	Callsign     string `gorm:"primaryKey;size:32"`
-	FullName     string
-	Email        string
+	Callsign string `gorm:"primaryKey;size:32"`
+	FullName string
+	// Email is indexed with COLLATE NOCASE. SQLite only uses that index for a
+	// query that names the collation, so every lookup by address must say
+	// COLLATE NOCASE too — a bare `email = ?` scans the table.
+	Email        string `gorm:"index:idx_users_email_nocase,collate:nocase"`
 	Maidenhead   string
 	Language     string
 	EnableAPRS   bool
@@ -131,6 +134,11 @@ func migrateDatabase(db *gorm.DB) error {
 	if err := backfillActivated(db); err != nil {
 		return err
 	}
+	// The email index is only used by a query that names the collation, so the
+	// lookup in lookupAccount must say COLLATE NOCASE too; see dbUser.Email.
+	if err := trimStoredEmails(db); err != nil {
+		return err
+	}
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		UpdateAll: true,
@@ -158,6 +166,16 @@ func schemaReady(db *gorm.DB) bool {
 		Raw("SELECT value FROM db_settings WHERE key = ?", schemaVersionKey).
 		Scan(&value).Error
 	return err == nil && value == schemaVersion
+}
+
+// trimStoredEmails removes surrounding whitespace from stored addresses.
+//
+// The email lookup is now an indexed equality rather than a scan that trimmed
+// each row as it compared, so a legacy address written with a trailing space
+// would stop matching. Trimming once, here, keeps the index authoritative. It is
+// idempotent: after the first run the WHERE clause matches nothing.
+func trimStoredEmails(db *gorm.DB) error {
+	return db.Model(&dbUser{}).Where("email <> TRIM(email)").UpdateColumn("email", gorm.Expr("TRIM(email)")).Error
 }
 
 // backfillActivated marks pre-existing accounts as activated.

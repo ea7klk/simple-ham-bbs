@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // Account flows that need email: activation, password reset, email change.
@@ -155,6 +157,17 @@ func (a *app) sendPasswordReset(identifier string) error {
 	return nil
 }
 
+// emailLookup is the one query that finds an account by address.
+//
+// It names COLLATE NOCASE deliberately: SQLite only uses the collated index when
+// the query asks for the collation too, and a bare `email = ?` scans the table —
+// 132 ms at ten thousand users. It lives on its own so a test can assert that the
+// query the code actually builds is the indexed one, rather than asserting on a
+// copy of the SQL written in the test.
+func emailLookup(db *gorm.DB, identifier string) *gorm.DB {
+	return db.Where("email = ? COLLATE NOCASE", strings.TrimSpace(identifier))
+}
+
 // lookupAccount resolves a callsign or an email address to an account.
 func (a *app) lookupAccount(identifier string) (userProfile, string, bool, error) {
 	identifier = sanitizeSingleLineText(identifier)
@@ -170,17 +183,15 @@ func (a *app) lookupAccount(identifier string) (userProfile, string, bool, error
 	if !strings.Contains(identifier, "@") {
 		return userProfile{}, "", false, nil
 	}
-	users, err := a.loadUsers()
+	row := dbUser{}
+	err := emailLookup(a.db, identifier).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return userProfile{}, "", false, nil
+	}
 	if err != nil {
 		return userProfile{}, "", false, err
 	}
-	want := strings.ToLower(identifier)
-	for callsign, profile := range users {
-		if strings.ToLower(strings.TrimSpace(profile.Email)) == want {
-			return profile, callsign, true, nil
-		}
-	}
-	return userProfile{}, "", false, nil
+	return profileFromRow(row), row.Callsign, true, nil
 }
 
 // beginEmailChange starts the double confirmation and reports what was sent.
