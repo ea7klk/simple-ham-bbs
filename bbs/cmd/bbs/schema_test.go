@@ -144,3 +144,50 @@ func TestWaitForSchemaSucceedsOnceMigrated(t *testing.T) {
 		t.Fatalf("waitForSchema on a migrated database: %v", err)
 	}
 }
+
+// A table added without a version bump must still be created: the marker records
+// that a migration ran, not that this build's migration ran.
+func TestMissingTableIsRepairedDespiteCurrentMarker(t *testing.T) {
+	a := testApp(t)
+
+	// Simulate the state that shipped in v1.30: marker says current, a table is
+	// absent because the version was never bumped.
+	if err := a.db.Migrator().DropTable(&dbAPRSBulletin{}); err != nil {
+		t.Fatal(err)
+	}
+	// The marker already exists from the test app's initialisation; make sure it
+	// reads as current regardless of version.
+	if err := a.db.Model(&dbSetting{}).Where("key = ?", schemaVersionKey).
+		UpdateColumn("value", schemaVersion).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !schemaReady(a.db) {
+		t.Fatal("precondition: marker should read as current")
+	}
+	if missing := missingTables(a.db); len(missing) == 0 {
+		t.Fatal("missingTables did not notice the dropped table")
+	} else {
+		t.Logf("detected missing: %v", missing)
+	}
+
+	if err := a.initialize(); err != nil {
+		t.Fatal(err)
+	}
+	if !a.db.Migrator().HasTable(&dbAPRSBulletin{}) {
+		t.Fatal("initialize did not recreate the missing table")
+	}
+	if missing := missingTables(a.db); len(missing) != 0 {
+		t.Fatalf("still missing after initialize: %v", missing)
+	}
+}
+
+// Every model the migration claims to create is actually created.
+func TestSchemaModelsAreAllCreated(t *testing.T) {
+	a := testApp(t)
+	if missing := missingTables(a.db); len(missing) != 0 {
+		t.Fatalf("migration did not create: %v", missing)
+	}
+	if len(schemaModels()) == 0 {
+		t.Fatal("schemaModels is empty")
+	}
+}

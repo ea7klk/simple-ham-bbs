@@ -163,3 +163,25 @@ a repeated bulletin does not look stale.
   for every category.
 - `pruneAPRSBulletins` runs with the other nightly housekeeping in
   `rotateRuntimeLogsNightly`.
+
+## A bug found on deploy, and the fix
+
+The first release of this feature shipped **without its table**. The one-shot
+migration from the scalability work is gated on a `schema.version` marker, and
+adding a table requires bumping that version — which was forgotten. The marker
+read as current, `initialize` skipped the migration, and the deployed pod had no
+`db_aprs_bulletins` table. Nothing failed loudly: only an operator querying the
+schema would have noticed.
+
+Two changes, because a version constant that must be remembered is a defect with
+a delay:
+
+- `schemaModels()` is now the single list of expected tables, used both by
+  `AutoMigrate` and by a new `missingTables()` check, so the two cannot drift.
+- `initialize` re-runs the migration when any expected table is absent, whatever
+  the marker says, and logs `schema_repair` with the names. A forgotten bump now
+  degrades to a slower boot instead of a broken feature.
+
+The version was also bumped to `2` for this schema change. A test drops the table
+while the marker reads current — the exact state that shipped — and asserts the
+next initialisation repairs it.

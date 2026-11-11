@@ -158,7 +158,18 @@ func (a *app) initialize() error {
 	// restarts after a crash, and re-running AutoMigrate on every restart would
 	// be work for nothing. seedData stays outside the guard because it seeds and
 	// reports, not only migrates.
-	if !schemaReady(a.db) {
+	//
+	// The marker alone is not enough. It records that *a* migration ran, not that
+	// this build's migration ran, so a table added without a version bump would
+	// be missing while the marker looked current — which is exactly what
+	// happened once. Checking the tables are actually present costs a handful of
+	// sqlite_master lookups at supervisor start and turns that class of mistake
+	// into a slower boot rather than a broken feature.
+	missing := missingTables(a.db)
+	if !schemaReady(a.db) || len(missing) > 0 {
+		if len(missing) > 0 {
+			a.logBBSAction("", "schema_repair", "missing_tables=%q", strings.Join(missing, ","))
+		}
 		if err := migrateDatabase(a.db); err != nil {
 			return err
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -144,8 +145,41 @@ func openDatabase(path string) (*gorm.DB, error) {
 // It now runs once, from the supervisor (or an explicit `bbs_app migrate`), and
 // records completion so a session can tell whether the one-shot has happened
 // without doing the work itself.
+// schemaModels lists every table the migration is expected to create. It exists
+// so a forgotten version bump cannot leave a deployment without a table: the
+// initialiser checks these are actually present, not just that a marker says so.
+func schemaModels() []any {
+	return []any{&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{},
+		&dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAPRSBulletin{}, &dbAuthFailure{},
+		&dbRegistration{}, &dbActivation{}, &dbToken{}, &dbSetting{}}
+}
+
+// missingTables reports which of the expected tables do not exist.
+//
+// A marker in db_settings says a migration ran, but it cannot say the migration
+// ran *this* code. Adding a table without bumping schemaVersion is an easy
+// mistake — it shipped once — and the symptom is a runtime "no such table"
+// rather than a failed startup. Checking presence turns that into a migration on
+// the next start, so a forgotten bump degrades to a slower boot rather than a
+// broken feature.
+func missingTables(db *gorm.DB) []string {
+	missing := []string{}
+	for _, model := range schemaModels() {
+		if db.Migrator().HasTable(model) {
+			continue
+		}
+		name := fmt.Sprintf("%T", model)
+		stmt := &gorm.Statement{DB: db}
+		if err := stmt.Parse(model); err == nil && stmt.Schema != nil {
+			name = stmt.Schema.Table
+		}
+		missing = append(missing, name)
+	}
+	return missing
+}
+
 func migrateDatabase(db *gorm.DB) error {
-	if err := db.AutoMigrate(&dbUser{}, &dbBulletin{}, &dbBoard{}, &dbMessage{}, &dbAPRSSent{}, &dbAPRSSentPart{}, &dbAPRSReceived{}, &dbAPRSBulletin{}, &dbAuthFailure{}, &dbRegistration{}, &dbActivation{}, &dbToken{}, &dbSetting{}); err != nil {
+	if err := db.AutoMigrate(schemaModels()...); err != nil {
 		return err
 	}
 	if err := backfillRegistered(db); err != nil {
@@ -172,7 +206,9 @@ const (
 	schemaVersionKey = "schema.version"
 	// schemaVersion is bumped when a migration needs to run again after a code
 	// change; a session refuses to start against anything older.
-	schemaVersion = "1"
+	//
+	// History: 1 = initial marker, 2 = db_aprs_bulletins.
+	schemaVersion = "2"
 )
 
 // schemaReady reports whether migrateDatabase has completed against this file.
