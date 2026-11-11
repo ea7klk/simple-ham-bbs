@@ -258,14 +258,14 @@ configured from the environment, so no credential lives in this repository.
 
 ```sh
 # Mailcow-shaped defaults; see .env.example.
-BBS_SMTP_HOST=mail.ea7lk.es
+BBS_SMTP_HOST=mail.spainip.es
 BBS_SMTP_PORT=587
 BBS_SMTP_SECURITY=starttls      # starttls (587) | tls (465) | none (local relay)
-BBS_SMTP_USERNAME=bbs@ea7lk.es
+BBS_SMTP_USERNAME=bbs@ea7klk.es
 BBS_SMTP_PASSWORD=...
-BBS_SMTP_FROM=bbs@ea7lk.es
+BBS_SMTP_FROM=bbs@ea7klk.es
 BBS_SMTP_FROM_NAME=HAMNET Radio BBS
-BBS_WEB_BASE_URL=https://bbs.ea7lk.es
+BBS_WEB_BASE_URL=https://bbs.ea7klk.es
 ```
 
 Mail is enabled only when the configuration is complete and genuine: the host
@@ -333,8 +333,8 @@ Reset and email-change links point at `BBS_WEB_BASE_URL`, not at the SSH
 service:
 
 ```
-https://bbs.ea7lk.es/reset?token=<token>
-https://bbs.ea7lk.es/email/confirm?token=<token>
+https://bbs.ea7klk.es/reset?token=<token>
+https://bbs.ea7klk.es/email/confirm?token=<token>
 ```
 
 The tokens live in the SQLite database the BBS already shares with the web BBS

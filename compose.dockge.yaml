@@ -62,7 +62,7 @@ services:
       - BBS_SMTP_PASSWORD=${BBS_SMTP_PASSWORD:-}
       - BBS_SMTP_FROM=${BBS_SMTP_FROM:-}
       - BBS_SMTP_FROM_NAME=${BBS_SMTP_FROM_NAME:-HAMNET Radio BBS}
-      - BBS_WEB_BASE_URL=${BBS_WEB_BASE_URL:-https://bbs.ea7lk.es}
+      - BBS_WEB_BASE_URL=${BBS_WEB_BASE_URL:-https://bbs.ea7klk.es}
       - BBS_FALLBACK_GATEWAY=${BBS_FALLBACK_GATEWAY:-172.18.0.1}
     volumes:
       - type: bind

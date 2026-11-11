@@ -70,7 +70,7 @@ func newMailerFromEnv() *mailer {
 		from:       strings.TrimSpace(env("BBS_SMTP_FROM", os.Getenv("BBS_SMTP_USERNAME"))),
 		fromName:   env("BBS_SMTP_FROM_NAME", "HAMNET Radio BBS"),
 		security:   strings.ToLower(strings.TrimSpace(env("BBS_SMTP_SECURITY", "starttls"))),
-		webBaseURL: strings.TrimRight(env("BBS_WEB_BASE_URL", "https://bbs.ea7lk.es"), "/"),
+		webBaseURL: strings.TrimRight(env("BBS_WEB_BASE_URL", "https://bbs.ea7klk.es"), "/"),
 	}, now: time.Now}
 	m.send = m.smtpSend
 	return m
@@ -159,7 +159,7 @@ func isPlaceholderValue(v string) bool {
 }
 
 func (m *mailer) WebURL(path string) string {
-	base := "https://bbs.ea7lk.es"
+	base := "https://bbs.ea7klk.es"
 	if m != nil && strings.TrimSpace(m.cfg.webBaseURL) != "" {
 		base = m.cfg.webBaseURL
 	}

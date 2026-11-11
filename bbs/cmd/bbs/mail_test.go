@@ -18,7 +18,7 @@ func captureMailer(t *testing.T, a *app) *[]mailMessage {
 			from:       "bbs@example.org",
 			fromName:   "Test BBS",
 			security:   "starttls",
-			webBaseURL: "https://bbs.ea7lk.es",
+			webBaseURL: "https://bbs.ea7klk.es",
 		},
 		now: func() time.Time { return time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC) },
 		send: func(msg mailMessage) error {
@@ -44,14 +44,14 @@ func TestMailerDisabledWithoutHost(t *testing.T) {
 	if err := nilMailer.Send(mailMessage{To: "a@example.org"}); err == nil {
 		t.Fatal("nil mailer Send returned no error")
 	}
-	if got := nilMailer.WebURL("/reset"); got != "https://bbs.ea7lk.es/reset" {
+	if got := nilMailer.WebURL("/reset"); got != "https://bbs.ea7klk.es/reset" {
 		t.Fatalf("nil mailer WebURL = %q", got)
 	}
 }
 
 func TestMailerWebURLTrimsTrailingSlash(t *testing.T) {
-	m := &mailer{cfg: mailConfig{webBaseURL: "https://bbs.ea7lk.es/"}}
-	if got := m.WebURL("/reset?token=abc"); got != "https://bbs.ea7lk.es/reset?token=abc" {
+	m := &mailer{cfg: mailConfig{webBaseURL: "https://bbs.ea7klk.es/"}}
+	if got := m.WebURL("/reset?token=abc"); got != "https://bbs.ea7klk.es/reset?token=abc" {
 		t.Fatalf("WebURL = %q", got)
 	}
 }
@@ -113,7 +113,7 @@ func TestFormatAddress(t *testing.T) {
 // Wrapping must not break a URL in half: a link split across lines is a broken
 // link in most mail clients.
 func TestWrapBodyKeepsLongTokensIntact(t *testing.T) {
-	link := "https://bbs.ea7lk.es/reset?token=" + strings.Repeat("a", 60)
+	link := "https://bbs.ea7klk.es/reset?token=" + strings.Repeat("a", 60)
 	body := wrapBody("Open this link to choose a new password:\n\n"+link+"\n\nThanks", 40)
 	if !strings.Contains(body, link) {
 		t.Fatalf("URL was split by the wrapper:\n%s", body)
@@ -342,7 +342,7 @@ func TestForgotPasswordSendsLinkInUserLanguage(t *testing.T) {
 	if !strings.Contains(msg.Subject, "Passwort") {
 		t.Fatalf("reset mail not in the user's language: %q", msg.Subject)
 	}
-	if !strings.Contains(msg.Body, "https://bbs.ea7lk.es/reset?token=") {
+	if !strings.Contains(msg.Body, "https://bbs.ea7klk.es/reset?token=") {
 		t.Fatalf("reset mail has no tokenised link:\n%s", msg.Body)
 	}
 
@@ -444,7 +444,7 @@ func TestEmailChangeNeedsBothConfirmations(t *testing.T) {
 	recipients := map[string]bool{}
 	for _, msg := range *sent {
 		recipients[msg.To] = true
-		if !strings.Contains(msg.Body, "https://bbs.ea7lk.es/email/confirm?token=") {
+		if !strings.Contains(msg.Body, "https://bbs.ea7klk.es/email/confirm?token=") {
 			t.Fatalf("change mail has no tokenised link:\n%s", msg.Body)
 		}
 	}
@@ -682,12 +682,12 @@ func TestMailTextsCoverEveryUILanguage(t *testing.T) {
 // registrations would be blocked at activation.
 func TestMailProblemRefusesHalfFilledConfiguration(t *testing.T) {
 	base := mailConfig{
-		host:       "mail.ea7lk.es",
+		host:       "mail.spainip.es",
 		port:       587,
-		username:   "bbs@ea7lk.es",
-		from:       "bbs@ea7lk.es",
+		username:   "bbs@ea7klk.es",
+		from:       "bbs@ea7klk.es",
 		security:   "starttls",
-		webBaseURL: "https://bbs.ea7lk.es",
+		webBaseURL: "https://bbs.ea7klk.es",
 	}
 
 	withPassword := func(pw string) *mailer {
@@ -737,14 +737,14 @@ func TestMailProblemCoversEachSetting(t *testing.T) {
 		{"from not an address", func(c *mailConfig) { c.from = "bbs" }, "BBS_SMTP_FROM"},
 		{"bad port", func(c *mailConfig) { c.port = 0 }, "BBS_SMTP_PORT"},
 		{"bad security", func(c *mailConfig) { c.security = "ssl" }, "BBS_SMTP_SECURITY"},
-		{"relative url", func(c *mailConfig) { c.webBaseURL = "bbs.ea7lk.es" }, "BBS_WEB_BASE_URL"},
+		{"relative url", func(c *mailConfig) { c.webBaseURL = "bbs.ea7klk.es" }, "BBS_WEB_BASE_URL"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := mailConfig{
-				host: "mail.ea7lk.es", port: 587, username: "bbs@ea7lk.es",
-				password: "real", from: "bbs@ea7lk.es", security: "starttls",
-				webBaseURL: "https://bbs.ea7lk.es",
+				host: "mail.spainip.es", port: 587, username: "bbs@ea7klk.es",
+				password: "real", from: "bbs@ea7klk.es", security: "starttls",
+				webBaseURL: "https://bbs.ea7klk.es",
 			}
 			tc.mutate(&cfg)
 			m := &mailer{cfg: cfg}
@@ -774,9 +774,9 @@ func TestReportMailStateLogsTheReason(t *testing.T) {
 	a := testApp(t)
 	a.cfg.bbsLogFile = t.TempDir() + "/bbs.log"
 	a.mail = &mailer{cfg: mailConfig{
-		host: "mail.ea7lk.es", port: 587, username: "bbs@ea7lk.es",
-		password: "__SET_ME__", from: "bbs@ea7lk.es", security: "starttls",
-		webBaseURL: "https://bbs.ea7lk.es",
+		host: "mail.spainip.es", port: 587, username: "bbs@ea7klk.es",
+		password: "__SET_ME__", from: "bbs@ea7klk.es", security: "starttls",
+		webBaseURL: "https://bbs.ea7klk.es",
 	}}
 	a.reportMailState()
 	body, err := os.ReadFile(a.cfg.bbsLogFile)
