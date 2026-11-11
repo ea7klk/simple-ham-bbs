@@ -296,7 +296,8 @@ it, so a placeholder can be committed without weakening anything:
   placeholder. `bbs-env` is not managed by Fleet, so the real password is never
   committed and never reverted by drift correction.
 
-To turn mail on, set the real Mailcow password on the cluster:
+To turn mail on, set the real Mailcow password in the `bbs-env` Secret — in
+Rancher under **Storage → Secrets → `bbs-env`**, or from a shell:
 
 ```sh
 kubectl -n ham-bbs patch secret bbs-env --type merge \
@@ -305,9 +306,14 @@ kubectl -n ham-bbs rollout restart deploy/bbs
 kubectl -n ham-bbs logs deploy/bbs --tail=20 | grep mail_
 ```
 
-`mail_enabled` means it took. `mail_disabled` prints the reason. To turn mail
-off again, remove the key (`patch` with `"BBS_SMTP_PASSWORD":null`) or blank it;
+Then restart the Deployment so the entrypoint re-reads the environment.
+`mail_enabled` means it took; `mail_disabled` prints the reason. To turn mail off
+again, remove the key (`patch` with `"BBS_SMTP_PASSWORD":null`) or blank it;
 either leaves the app with no usable password and it stays off.
+
+Do **not** set the password on the `bbs-smtp` Secret: Fleet owns it, so the edit
+would be reverted on the next sync. Only non-secret settings belong there, and
+they are changed in `spainip/infra`, not in the cluster.
 
 Messages are sent in the user's language (English, German, Spanish, French) and
 contain a plain-text link, never an HTML body. Sending is synchronous with a 20 s
