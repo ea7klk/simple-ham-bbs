@@ -58,7 +58,7 @@ func (a *app) aprsMenu(callsign string, profile userProfile, lang string) userPr
 		case "6":
 			a.keepaliveAPRSThursday(callsign, profile, lang)
 		case "7":
-			a.joinAPRSPH(callsign, profile, lang)
+			a.aprsphManageMenu(callsign, profile, lang)
 		case "9":
 			a.showAPRSBulletinCategories(lang)
 		case "8":
@@ -215,25 +215,58 @@ func (a *app) keepaliveAPRSThursday(callsign string, profile userProfile, lang s
 	a.sendAPRSBotCommand(callsign, profile, lang, "aprs_keepalive_aprs_thursday", aprsBotANSRVR, aprsHOTGKeep, false)
 }
 
-// joinAPRSPH checks in to the APRSPH net: "CQ <text>" to the APRSPH bot.
-//
-// The destination is the bot's callsign. Sending this to ANSRVR instead joins a
-// group named after the first word of the text, which is what used to happen.
-func (a *app) joinAPRSPH(callsign string, profile userProfile, lang string) {
-	a.sendAPRSBotCommand(callsign, profile, lang, "aprs_join_aprsph", aprsBotAPRSPH, aprsAPRSPHCQ, true)
-}
-
 // sendAPRSBotCommand sends one bot command, optionally with the user's text
 // appended to a fixed prefix.
 //
 // The command is sent as a single APRS message: splitting would put the command
 // into part one with a "[1/2] " prefix and the rest into part two, so neither
 // part would be a valid command.
+// requireAPRSEnabled shows the enable prompt and reports whether the account may
+// send. Every bot path needs this check and the message is always the same.
+func (a *app) requireAPRSEnabled(lang, title string, profile userProfile) bool {
+	if profile.EnableAPRS {
+		return true
+	}
+	a.showInfo(lang, title, [][]string{
+		{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)},
+		{a.t(lang, "aprs_ssid_info")},
+		{a.t(lang, "aprs_enable_required")},
+	})
+	return false
+}
+
+// dispatchAPRSCommand sends one prepared bot command and reports the result.
+//
+// Shared by the ANSRVR check-ins and the APRSPH command set, so both show the
+// same failure detail and record the same history row.
+func (a *app) dispatchAPRSCommand(callsign string, lang, title, destination, command string) bool {
+	// Say where it is going: the two bots are easy to confuse, and the
+	// difference is exactly what used to break this.
+	a.showSendingAPRS(lang, destination)
+	sent, ok := a.sendAPRSCommand(callsign, destination, command, lang)
+	if !ok {
+		detail := ""
+		if len(sent.Parts) > 0 {
+			detail = sent.Parts[len(sent.Parts)-1].Detail
+		}
+		if detail == "" {
+			detail = sent.Status
+		}
+		a.showInfoActions(lang, a.t(lang, "aprs_send_failed"),
+			[][]string{{detail}, {a.t(lang, "aprs_retry_prompt")}},
+			[]option{{"o", a.t(lang, "ok_button")}})
+		return false
+	}
+	_ = a.addSent(callsign, sent)
+	a.logBBSAction(callsign, "aprs_send", "to=%q parts=%d command=%q", sent.To, len(sent.Parts), command)
+	a.showInfoActions(lang, a.t(lang, "aprs_send_success"), a.aprsSentResultRows(lang, sent), []option{{"o", a.t(lang, "ok_button")}})
+	return true
+}
+
 func (a *app) sendAPRSBotCommand(callsign string, profile userProfile, lang, titleKey, destination, prefix string, askText bool) bool {
 	title := a.t(lang, titleKey)
 	for {
-		if !profile.EnableAPRS {
-			a.showInfo(lang, title, [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
+		if !a.requireAPRSEnabled(lang, title, profile) {
 			return false
 		}
 
@@ -259,28 +292,16 @@ func (a *app) sendAPRSBotCommand(callsign string, profile userProfile, lang, tit
 			text = prefix + " " + strings.TrimSpace(values["text"])
 		}
 
-		// Say where it is going: the two bots are easy to confuse, and the
-		// difference is exactly what used to break this.
-		a.showSendingAPRS(lang, destination)
-		sent, okSend := a.sendAPRSCommand(callsign, destination, text, lang)
-		if !okSend {
-			detail := ""
-			if len(sent.Parts) > 0 {
-				detail = sent.Parts[len(sent.Parts)-1].Detail
-			}
-			if detail == "" {
-				detail = sent.Status
-			}
-			action := a.showInfoActions(lang, a.t(lang, "aprs_send_failed"), [][]string{{detail}, {a.t(lang, "aprs_retry_prompt")}}, []option{{"r", a.t(lang, "retry_button")}, {"q", a.t(lang, "cancel_button")}})
-			if action == "r" {
-				continue
-			}
+		if a.dispatchAPRSCommand(callsign, lang, title, destination, text) {
+			return true
+		}
+		// Offer a retry rather than dropping the user back to the menu.
+		action := a.showInfoActions(lang, a.t(lang, "aprs_send_failed"),
+			[][]string{{a.t(lang, "aprs_retry_prompt")}},
+			[]option{{"r", a.t(lang, "retry_button")}, {"q", a.t(lang, "cancel_button")}})
+		if action != "r" {
 			return false
 		}
-		_ = a.addSent(callsign, sent)
-		a.logBBSAction(callsign, "aprs_send", "to=%q parts=%d command=%q", sent.To, len(sent.Parts), prefix)
-		a.showInfoActions(lang, a.t(lang, "aprs_send_success"), a.aprsSentResultRows(lang, sent), []option{{"o", a.t(lang, "ok_button")}})
-		return true
 	}
 }
 

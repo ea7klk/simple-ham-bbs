@@ -247,9 +247,15 @@ are addressed differently, which is easy to get wrong:
 - **#APRSThursday** — `CQ HOTG <your text>` sent to **ANSRVR**, the group server.
   `Leave` sends `U HOTG` to stop the group's traffic reaching your local network;
   `Extend` sends `K HOTG`. Check-in is only offered on Thursdays.
-- **APRSPH** — `CQ <your text>` sent to the **bot at callsign APRSPH**. It is not
-  a group: sending it to ANSRVR joins a group named after the first word of your
-  message instead, which is what happened before this was corrected.
+- **APRSPH** — the bot at callsign **`APRSPH`**. It is not a group: sending to
+  ANSRVR joins a group named after the first word of your message instead. The
+  APRS menu opens a submenu for the bot's own command set, so the syntax does not
+  have to be remembered:
+  check in (`CQ`), quiet check-in (`NET`), `LIST`, `LAST`/`LAST10`/`LAST15`
+  including the `THURS` variant, `MINE` (optionally for another callsign-SSID),
+  `SEARCH`, `?APRSM`, `?APRST`/`?APRSP`/`?APRSS`, `U` to check out, and `HELP`.
+  Commands are sent exactly as documented at <https://aprsph.net/>; only the
+  labels and prompts are translated.
 
 These commands are sent as a single APRS message and are never split. A check-in
 too long for one message is refused with the limit shown, because a split command

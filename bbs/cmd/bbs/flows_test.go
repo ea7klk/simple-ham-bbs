@@ -452,7 +452,10 @@ func TestAPRSMenusAndRows(t *testing.T) {
 	a.showInfoActionsHook = func(lang, title string, rows [][]string, actions []option) string { return "q" }
 	a.showSentAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en")
 	a.showReceivedAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en")
-	a.joinAPRSPH("EA7KLK", userProfile{EnableAPRS: false}, "en")
+	// Disabled accounts are refused by the submenu entry point. It opens with a
+	// menu, so give it one that quits rather than reusing the exhausted queue.
+	a.runMenuHook = func(lang, title, header string, opts []option) string { return "q" }
+	a.aprsphManageMenu("EA7KLK", userProfile{EnableAPRS: false}, "en")
 	a.sendAPRS("EA7KLK", userProfile{EnableAPRS: false}, "en")
 	_ = time.Now()
 }
