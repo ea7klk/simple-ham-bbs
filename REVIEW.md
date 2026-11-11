@@ -806,9 +806,19 @@ thread.
   change ever writes a value there from user input, or drops `%q`, the file
   becomes an injection vector and must be replaced with explicit `export`
   statements or a non-shell format.
-- **L7. `readJSON` swallows malformed JSON** (`storage.go:147-164`): a corrupt
-  `translations.json` silently yields an empty translation map and a UI full of
-  raw keys. Log the parse error instead of falling back silently.
+- **L7. `readJSON` swallowed malformed JSON — FIXED.** A corrupt
+  `translations.json` silently yielded an empty translation map, so the BBS came
+  up looking healthy and every screen showed raw keys.
+
+  `readJSON` now returns a wrapped `parse <path>: <err>` for a malformed file
+  while still applying the fallback, and `newApp` records it to `bbs.log` as
+  `action=translations_parse_error` with the path. Startup still succeeds: a BBS
+  that refuses to boot because one JSON file is corrupt is worse than one that
+  runs degraded and says so in its log.
+
+  Tests: `readJSON` returns an error naming the file for malformed input and
+  still fills the fallback, and an end-to-end `newApp()` run against a corrupt
+  file starts successfully and leaves the log line.
 - **L8. `parseSysops` does not validate** (`app.go:49-56`): a typo in
   `BBS_SYSOPS` is accepted, normalised, and then simply never matches — meaning
   an operator can believe they have a sysop when they do not. Validate against

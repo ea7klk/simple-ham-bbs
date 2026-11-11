@@ -142,11 +142,17 @@ func TestStorageUsersPasswordsAndJSON(t *testing.T) {
 	if target["ok"] != "true" || !exists(path) || exists(filepath.Join(dir, "nope")) {
 		t.Fatalf("readJSON/exists unexpected target=%#v", target)
 	}
+	// A malformed file still falls back, but must report the parse error so the
+	// caller can log it instead of silently serving raw keys.
 	if err := os.WriteFile(path, []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := readJSON(path, &target, map[string]string{"bad": "fallback"}); err != nil {
-		t.Fatal(err)
+	parseErr := readJSON(path, &target, map[string]string{"bad": "fallback"})
+	if parseErr == nil {
+		t.Fatal("readJSON swallowed a malformed JSON file")
+	}
+	if !strings.Contains(parseErr.Error(), path) {
+		t.Fatalf("readJSON error does not name the file: %v", parseErr)
 	}
 	if target["bad"] != "fallback" {
 		t.Fatalf("readJSON invalid fallback = %#v", target)
@@ -229,5 +235,37 @@ func TestLoggingWritesFile(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "action=login user=EA7KLK sysop=true") {
 		t.Fatalf("BBS log missing action: %s", body)
+	}
+}
+
+// A corrupt translations file must leave a trace instead of silently serving
+// raw keys.
+func TestMalformedTranslationsIsLogged(t *testing.T) {
+	dir := t.TempDir()
+	transPath := filepath.Join(dir, "translations.json")
+	if err := os.WriteFile(transPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "bbs.log")
+
+	t.Setenv("BBS_TRANSLATIONS_FILE", transPath)
+	t.Setenv("BBS_DATA_DIR", dir)
+	t.Setenv("BBS_DB_FILE", filepath.Join(dir, "bbs.sqlite"))
+	t.Setenv("BBS_AUTH_LOG_FILE", filepath.Join(dir, "auth.log"))
+
+	a, err := newApp()
+	if err != nil {
+		t.Fatalf("newApp() refused to start on a malformed translations file: %v", err)
+	}
+	if a == nil {
+		t.Fatal("newApp() returned no app")
+	}
+
+	body, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("no log file written: %v", readErr)
+	}
+	if !strings.Contains(string(body), "translations_parse_error") || !strings.Contains(string(body), transPath) {
+		t.Fatalf("parse error not logged: %q", body)
 	}
 }

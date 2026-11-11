@@ -38,7 +38,9 @@ func newApp() (*app, error) {
 	cfg.topic = sanitizeSingleLineText(cfg.topic)
 	text := map[string]map[string]any{}
 	if err := readJSON(cfg.transFile, &text, map[string]map[string]any{}); err != nil {
-		return nil, err
+		// Keep running with the fallback map, but say so: a silent fallback
+		// renders raw translation keys and looks like a UI bug.
+		appendLogFile(cfg.bbsLogFile, fmt.Sprintf("%s config action=translations_parse_error file=%q error=%q\n", now(), cfg.transFile, err.Error()))
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err

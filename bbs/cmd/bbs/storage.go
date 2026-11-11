@@ -175,6 +175,13 @@ func verifyPassword(password, stored string) bool {
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
+// readJSON loads path into target, falling back when the file is missing.
+//
+// A malformed file still falls back — a BBS that refuses to start because one
+// JSON file is corrupt is worse than one that runs with raw translation keys —
+// but the parse error is returned so the caller can log it. Returning nil there
+// is what left a corrupt translations.json looking like a working install with
+// a UI full of raw keys.
 func readJSON[T any](path string, target *T, fallback T) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -186,7 +193,7 @@ func readJSON[T any](path string, target *T, fallback T) error {
 	}
 	if err := json.Unmarshal(data, target); err != nil {
 		*target = fallback
-		return nil
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	return nil
 }
