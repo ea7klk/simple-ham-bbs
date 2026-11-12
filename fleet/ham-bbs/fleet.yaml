@@ -1,0 +1,10 @@
+# Ham BBS server, its Service, its data claims and the public route.
+# Moved out of the infra repository on 2026-11-12 (FLEET-IMPROVEMENT.md).
+# The companion web frontend lives in ea7klk/ham-bbs-web and mounts the
+# shared data claim, so both bundles write to the ham-bbs namespace and may
+# not be split into separate release names without care.
+defaultNamespace: ham-bbs
+kustomize:
+  dir: .
+helm:
+  takeOwnership: true

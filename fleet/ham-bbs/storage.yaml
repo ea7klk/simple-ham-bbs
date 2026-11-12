@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: v-c9a1e68f1b139838
+  namespace: ham-bbs
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: retained-local-path
+  volumeMode: Filesystem
+  volumeName: pvc-eded828d-5d16-4d45-8e5e-5763f48b3ac5
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: v-daedbc100d077ade
+  namespace: ham-bbs
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: retained-local-path
+  volumeMode: Filesystem
+  volumeName: pvc-a1b67efd-9a70-47eb-8c65-a6b588913b7c
