@@ -263,6 +263,19 @@ type formModel struct {
 	action    string
 	values    map[string]string
 	done      bool
+	// center lays the title, intro, fields and buttons out in the middle of
+	// the panel instead of against the left edge. Used by the login screen,
+	// which is the first thing a caller sees and has little on it.
+	center bool
+	// intro is explanatory text shown under the title, before the fields, with
+	// a blank line between the two. Each entry is one rendered line.
+	intro []string
+}
+
+// formStyle selects the layout a form uses.
+type formStyle struct {
+	Center bool
+	Intro  []string
 }
 
 func newFormModel(a *app, lang, title string, fields []formField, buttons []string) formModel {
@@ -469,8 +482,26 @@ func (m formModel) validate() (map[string]string, string) {
 func (m formModel) View() string {
 	var b strings.Builder
 	b.WriteString(m.app.banner(m.lang))
-	b.WriteString(limitLines(titleStyle.Render(m.title), 6) + "\n\n")
 
+	if m.center {
+		// A highlighted band, centred: this is the first screen a caller sees
+		// and it should read as a heading rather than as another line of text.
+		b.WriteString(centerBlock(loginTitleStyle.Render(m.title), panelContentWidth) + "\n")
+		if len(m.intro) > 0 {
+			b.WriteString("\n")
+			for _, line := range m.intro {
+				b.WriteString(centerBlock(dimStyle.Render(line), panelContentWidth) + "\n")
+			}
+			// A blank line between the explanation and the fields, so the two
+			// do not read as one block.
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString(limitLines(titleStyle.Render(m.title), 6) + "\n\n")
+	}
+
+	// Fields are built separately so the whole block can be centred as a unit.
+	var fields strings.Builder
 	buttonsLine := m.renderButtons()
 	errLines := 0
 	if m.err != "" {
@@ -485,7 +516,7 @@ func (m formModel) View() string {
 	}
 	start, end := m.visibleFieldRange(fieldRoom)
 	if start > 0 {
-		b.WriteString(dimStyle.Render(m.app.t(m.lang, "form_more_fields_above")) + "\n")
+		fields.WriteString(dimStyle.Render(m.app.t(m.lang, "form_more_fields_above")) + "\n")
 	}
 	for i := start; i < end; i++ {
 		if m.fields[i].sameLine {
@@ -493,24 +524,45 @@ func (m formModel) View() string {
 			for groupEnd < end && m.fields[groupEnd].sameLine {
 				groupEnd++
 			}
-			b.WriteString(m.renderInlineFields(i, groupEnd))
+			fields.WriteString(m.renderInlineFields(i, groupEnd))
 			i = groupEnd - 1
 			continue
 		}
-		b.WriteString(m.renderField(i))
+		fields.WriteString(m.renderField(i))
 	}
 	if end < len(m.fields) {
-		b.WriteString(dimStyle.Render(m.app.t(m.lang, "form_more_fields_below")) + "\n")
+		fields.WriteString(dimStyle.Render(m.app.t(m.lang, "form_more_fields_below")) + "\n")
 	}
-	b.WriteString(buttonsLine)
+
+	fieldBlock := fields.String()
+	if m.center {
+		b.WriteString(centerBlockAligned(strings.TrimRight(fieldBlock, "\n"), panelContentWidth) + "\n")
+	} else {
+		b.WriteString(fieldBlock)
+	}
+
+	if m.center {
+		b.WriteString(centerBlockAligned(strings.TrimRight(buttonsLine, " "), panelContentWidth) + "\n")
+	} else {
+		b.WriteString(buttonsLine)
+	}
+
 	if m.err != "" {
-		b.WriteString("\n\n" + errorStyle.Render(m.err))
+		if m.center {
+			b.WriteString("\n\n" + centerBlock(errorStyle.Render(m.err), panelContentWidth))
+		} else {
+			b.WriteString("\n\n" + errorStyle.Render(m.err))
+		}
 	}
 	hintKey := "form_hint_actions"
 	if m.noButtons {
 		hintKey = "form_hint_submit"
 	}
-	b.WriteString("\n" + dimWrapped(m.app.t(m.lang, hintKey), panelContentWidth))
+	if m.center {
+		b.WriteString("\n" + centerBlock(dimStyle.Render(m.app.t(m.lang, "form_hint_actions")), panelContentWidth))
+	} else {
+		b.WriteString("\n" + dimWrapped(m.app.t(m.lang, hintKey), panelContentWidth))
+	}
 	return formPanelStyle.Render(b.String())
 }
 
@@ -732,11 +784,22 @@ func (a *app) runMenu(lang, title, header string, opts []option) string {
 }
 
 func (a *app) runForm(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool) {
+	return a.runFormStyled(lang, title, fields, buttons, formStyle{})
+}
+
+// runFormStyled is runForm with a layout: an optional centred presentation and
+// an introductory block above the fields.
+//
+// The hook keeps the plain signature, so tests that drive forms through
+// runFormHook are unaffected by layout.
+func (a *app) runFormStyled(lang, title string, fields []formField, buttons []string, style formStyle) (string, map[string]string, bool) {
 	if a.runFormHook != nil {
 		return a.runFormHook(lang, title, fields, buttons)
 	}
 	clearScreen()
 	m := newFormModel(a, lang, title, fields, buttons)
+	m.center = style.Center
+	m.intro = style.Intro
 	model, err := runTerminalProgram(m)
 	if err != nil {
 		a.recordTerminalError(err)
@@ -744,6 +807,58 @@ func (a *app) runForm(lang, title string, fields []formField, buttons []string) 
 	}
 	done := model.(formModel)
 	return done.action, done.values, done.action != "cancel" && done.values != nil
+}
+
+// centerBlock pads each line of block so it sits in the middle of width.
+//
+// Padding is inserted outside the ANSI styling, so a styled line keeps its
+// colour and the visible width is what is measured.
+func centerBlock(block string, width int) string {
+	if width <= 0 {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		w := lipgloss.Width(line)
+		if w >= width {
+			continue
+		}
+		if pad := (width - w) / 2; pad > 0 {
+			lines[i] = strings.Repeat(" ", pad) + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// centerBlockAligned centres a multi-line block as a unit: every line gets the
+// same left padding, computed from the widest line, so the block keeps its own
+// internal alignment. Used for fields, where a ragged left edge looks like a
+// layout bug.
+func centerBlockAligned(block string, width int) string {
+	if width <= 0 {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	widest := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > widest {
+			widest = w
+		}
+	}
+	if widest >= width {
+		return block
+	}
+	pad := strings.Repeat(" ", (width-widest)/2)
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = pad + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func clearScreen() {

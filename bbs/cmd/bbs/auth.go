@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -26,18 +25,22 @@ func (a *app) authenticate() (string, userProfile, error) {
 			a.logBBSAction("", "login_locked", "address=%q remaining=%s", address, remaining.Truncate(time.Second))
 			return "", userProfile{}, errors.New(a.t("en", "too_many_attempts"))
 		}
-		var header strings.Builder
-		for _, code := range languageOrder {
-			header.WriteString(languages[code] + ": " + truncateText(strings.Join(a.tList(code, "login_info"), " "), panelContentWidth-12) + "\n")
+		// The explanation used to be every language's blurb joined into one
+		// line per language and then truncated, so the end of each sentence was
+		// cut off. It is now two short lines in the screen's language, shown in
+		// full.
+		loginTitle := a.t("en", "login_title")
+		intro := a.tList("en", "login_info")
+		if len(intro) > 2 {
+			intro = intro[:2]
 		}
-		loginTitle := "Login\n" + strings.TrimSpace(header.String())
-		action, values, ok := a.runForm("en", loginTitle, []formField{
+		action, values, ok := a.runFormStyled("en", loginTitle, []formField{
 			{
 				name: "callsign", label: a.t("en", "callsign_prompt"), required: true, limit: 16,
 				normalizer: normalizeCallsign, validator: func(v string) bool { return callsignRE.MatchString(v) }, invalidText: a.t("en", "invalid_callsign"),
 			},
 			{name: "password", label: a.t("en", "password"), kind: fieldPassword},
-		}, []string{"login", "forgot"})
+		}, []string{"login", "forgot"}, formStyle{Center: true, Intro: intro})
 		if !ok {
 			return "", userProfile{}, errLoginCancelled
 		}

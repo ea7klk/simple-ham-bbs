@@ -83,9 +83,8 @@
     "local_ssh": "Vorgeschlagener lokaler SSH-Zugang: ssh -p 2222 bbs@<host>",
     "logged_in_as": "Angemeldet als",
     "login_info": [
-      "Wichtig: SSH ist nur der Transport. Das BBS-Konto nutzt dein Rufzeichen.",
-      "Neue Rufzeichen müssen Name, E-Mail, Sprache und Passwort erfassen.",
-      "Passwörter werden als gesalzene PBKDF2-SHA256-Hashes gespeichert."
+      "SSH ist nur der Transport — dein Rufzeichen ist das BBS-Konto.",
+      "Registrierung mit Name, E-Mail, Sprache und Passwort; wir senden einen Code zur Aktivierung."
     ],
     "maidenhead": "Maidenhead-Locator",
     "menu_about": "Über dieses BBS",
@@ -290,7 +289,8 @@
     "aprs_section_prompt": "Welche Nachrichten?",
     "aprs_section_direct_desc": "Nachrichten mit anderen Stationen.",
     "aprs_section_aprsph_desc": "Verkehr mit dem APRSPH-Netz-Bot.",
-    "aprs_section_thursday_desc": "Gruppenserver-Verkehr von ANSRVR, den #APRSThursday nutzt."
+    "aprs_section_thursday_desc": "Gruppenserver-Verkehr von ANSRVR, den #APRSThursday nutzt.",
+    "login_title": "Anmelden / Registrieren"
   },
   "en": {
     "about_graphics": "Graphics: plain ANSI text, suitable for simple terminals.",
@@ -376,9 +376,8 @@
     "local_ssh": "Suggested local SSH access: ssh -p 2222 bbs@<host>",
     "logged_in_as": "Logged in as",
     "login_info": [
-      "Important: SSH is only the transport. The BBS account uses your callsign.",
-      "New callsigns must register with full name, email, language, and password.",
-      "Passwords are stored as salted PBKDF2-SHA256 hashes."
+      "SSH is only the transport — your callsign is the BBS account.",
+      "Register with full name, email, language and password; we email a code to activate."
     ],
     "maidenhead": "Maidenhead locator",
     "menu_about": "About this BBS",
@@ -583,7 +582,8 @@
     "aprs_section_prompt": "Which messages?",
     "aprs_section_direct_desc": "Messages exchanged with other stations.",
     "aprs_section_aprsph_desc": "Traffic with the APRSPH net bot.",
-    "aprs_section_thursday_desc": "Group-server traffic from ANSRVR, which #APRSThursday uses."
+    "aprs_section_thursday_desc": "Group-server traffic from ANSRVR, which #APRSThursday uses.",
+    "login_title": "Login / Register"
   },
   "es": {
     "about_graphics": "Gráficos: texto ANSI simple, apto para terminales sencillos.",
@@ -669,9 +669,8 @@
     "local_ssh": "Acceso SSH local sugerido: ssh -p 2222 bbs@<host>",
     "logged_in_as": "Conectado como",
     "login_info": [
-      "Importante: SSH es solo el transporte. La cuenta BBS usa tu indicativo.",
-      "Los indicativos nuevos deben registrar nombre, email, idioma y contraseña.",
-      "Las contraseñas se guardan como hashes PBKDF2-SHA256 con sal."
+      "SSH es solo el transporte: tu indicativo es la cuenta del BBS.",
+      "Regístrate con nombre, email, idioma y contraseña; enviamos un código para activarla."
     ],
     "maidenhead": "Locator Maidenhead",
     "menu_about": "Acerca de esta BBS",
@@ -876,7 +875,8 @@
     "aprs_section_prompt": "¿Qué mensajes?",
     "aprs_section_direct_desc": "Mensajes intercambiados con otras estaciones.",
     "aprs_section_aprsph_desc": "Tráfico con el bot de la red APRSPH.",
-    "aprs_section_thursday_desc": "Tráfico del servidor de grupos ANSRVR, que usa #APRSThursday."
+    "aprs_section_thursday_desc": "Tráfico del servidor de grupos ANSRVR, que usa #APRSThursday.",
+    "login_title": "Entrar / Registrarse"
   },
   "fr": {
     "about_graphics": "Graphismes : texte ANSI simple, adapté aux terminaux simples.",
@@ -962,9 +962,8 @@
     "local_ssh": "Accès SSH local suggéré : ssh -p 2222 bbs@<host>",
     "logged_in_as": "Connecté comme",
     "login_info": [
-      "Important : SSH est seulement le transport. Le compte BBS utilise ton indicatif.",
-      "Les nouveaux indicatifs doivent saisir nom, email, langue et mot de passe.",
-      "Les mots de passe sont stockés en hachages PBKDF2-SHA256 salés."
+      "SSH n'est que le transport — votre indicatif est le compte BBS.",
+      "Inscription avec nom, email, langue et mot de passe ; nous envoyons un code d'activation."
     ],
     "maidenhead": "Locator Maidenhead",
     "menu_about": "À propos de cette BBS",
@@ -1169,6 +1168,7 @@
     "aprs_section_prompt": "Quels messages ?",
     "aprs_section_direct_desc": "Messages échangés avec d'autres stations.",
     "aprs_section_aprsph_desc": "Trafic avec le bot du réseau APRSPH.",
-    "aprs_section_thursday_desc": "Trafic du serveur de groupes ANSRVR, utilisé par #APRSThursday."
+    "aprs_section_thursday_desc": "Trafic du serveur de groupes ANSRVR, utilisé par #APRSThursday.",
+    "login_title": "Connexion / Inscription"
   }
 }

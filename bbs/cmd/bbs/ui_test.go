@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -425,5 +426,163 @@ func TestRunReportsTerminalFailureInsteadOfCleanQuit(t *testing.T) {
 	err := a.run()
 	if err == nil || !strings.Contains(err.Error(), "input closed") {
 		t.Fatalf("run() = %v, want the terminal failure", err)
+	}
+}
+
+// --- Login screen layout ---------------------------------------------------
+
+var testANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// renderLoginForm builds the login form the way authenticate() does and returns
+// the panel with ANSI styling stripped, so positions can be measured.
+func renderLoginForm(t *testing.T) (string, string, []string) {
+	t.Helper()
+	a := testApp(t)
+	raw := map[string]map[string]any{}
+	if err := readJSON("../../translations.json", &raw, map[string]map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	a.text = raw
+	a.cfg.name = "HAMNET RADIO BBS"
+	a.cfg.location = "HamNet"
+	a.cfg.topic = "Tests"
+	title := a.t("en", "login_title")
+	intro := a.tList("en", "login_info")
+	m := newFormModel(a, "en", title, []formField{
+		{name: "callsign", label: a.t("en", "callsign_prompt"), required: true, limit: 16},
+		{name: "password", label: a.t("en", "password"), kind: fieldPassword},
+	}, []string{"login", "forgot"})
+	m.center = true
+	m.intro = intro
+	return testANSI.ReplaceAllString(m.View(), ""), title, intro
+}
+
+// The explanation must be readable in full. It used to be every language's blurb
+// joined and truncated, which cut off the end of each line.
+func TestLoginScreenShowsTheWholeExplanation(t *testing.T) {
+	view, _, intro := renderLoginForm(t)
+	if len(intro) == 0 || len(intro) > 2 {
+		t.Fatalf("explanation has %d lines, want 1 or 2", len(intro))
+	}
+	lines := strings.Split(view, "\n")
+	for _, want := range intro {
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("explanation line is not shown in full: %q\n%s", want, view)
+		}
+		if strings.Contains(lineContaining(view, want), "...") && len(want) > 20 {
+			t.Fatalf("explanation line was truncated: %q", lineContaining(view, want))
+		}
+	}
+}
+
+func lineContaining(view, needle string) string {
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
+
+// The heading is the highlighted, centred "Login / Register".
+func TestLoginScreenHeadingIsCentred(t *testing.T) {
+	view, title, _ := renderLoginForm(t)
+	if !strings.Contains(title, "/") {
+		t.Fatalf("heading is %q, want a login/register label", title)
+	}
+	line := lineContaining(view, title)
+	if line == "" {
+		t.Fatalf("heading not rendered:\n%s", view)
+	}
+	// Measure inside the panel border, which is present on both sides.
+	inner := strings.Trim(strings.Trim(line, " "), "│")
+	if leadingSpaces(inner) == 0 {
+		t.Fatalf("heading is not centred: %q", line)
+	}
+	// Centred means the gaps either side are close to equal.
+	left := leadingSpaces(inner)
+	right := len(inner) - len(strings.TrimRight(inner, " "))
+	if diff := left - right; diff > 2 || diff < -2 {
+		t.Fatalf("heading is off-centre: left %d right %d in %q", left, right, inner)
+	}
+}
+
+// A blank line separates the explanation from the fields.
+func TestLoginScreenHasSpacerBeforeFields(t *testing.T) {
+	view, _, intro := renderLoginForm(t)
+	lines := strings.Split(view, "\n")
+	lastIntro := -1
+	for i, line := range lines {
+		for _, want := range intro {
+			if strings.Contains(line, want) {
+				lastIntro = i
+			}
+		}
+	}
+	if lastIntro < 0 {
+		t.Fatal("explanation not found")
+	}
+	if lastIntro+1 >= len(lines) {
+		t.Fatal("nothing follows the explanation")
+	}
+	// The panel's own border is the only content allowed on the spacer line.
+	spacer := strings.TrimSpace(strings.Trim(lines[lastIntro+1], "│┌┐└┘─"))
+	if spacer != "" {
+		t.Fatalf("no spacer between explanation and fields: %q", lines[lastIntro+1])
+	}
+}
+
+// Fields and buttons sit in the middle of the panel, aligned with each other.
+func TestLoginScreenFieldsAndButtonsAreCentred(t *testing.T) {
+	view, _, _ := renderLoginForm(t)
+	lines := strings.Split(view, "\n")
+
+	indentOf := func(needle string) int {
+		for _, line := range lines {
+			if strings.Contains(line, needle) {
+				return leadingSpaces(strings.TrimPrefix(line, "│"))
+			}
+		}
+		return -1
+	}
+	callsign := indentOf("Callsign or handle")
+	password := indentOf("Password [")
+	buttons := indentOf("[ Login ]")
+	for name, got := range map[string]int{"callsign": callsign, "password": password, "buttons": buttons} {
+		if got <= 0 {
+			t.Fatalf("%s is not centred (indent %d)\n%s", name, got, view)
+		}
+	}
+	if callsign != password {
+		t.Fatalf("inputs are not aligned: callsign indent %d, password indent %d", callsign, password)
+	}
+}
+
+func leadingSpaces(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " "))
+}
+
+// centring a block keeps its internal alignment instead of staggering it.
+func TestCenterBlockAlignedKeepsSharedIndent(t *testing.T) {
+	block := "short\nmuch longer line"
+	out := centerBlockAligned(block, 40)
+	lines := strings.Split(out, "\n")
+	if leadingSpaces(lines[0]) != leadingSpaces(lines[1]) {
+		t.Fatalf("lines got different indents: %q", out)
+	}
+	if leadingSpaces(lines[0]) == 0 {
+		t.Fatalf("block was not moved right: %q", out)
+	}
+	// A block already as wide as the panel is returned untouched.
+	wide := strings.Repeat("x", 40)
+	if got := centerBlockAligned(wide, 40); got != wide {
+		t.Fatalf("wide block was modified: %q", got)
 	}
 }
