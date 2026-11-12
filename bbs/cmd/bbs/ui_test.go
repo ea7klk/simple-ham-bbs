@@ -586,3 +586,58 @@ func TestCenterBlockAlignedKeepsSharedIndent(t *testing.T) {
 		t.Fatalf("wide block was modified: %q", got)
 	}
 }
+
+// --- Contrast --------------------------------------------------------------
+
+// The explanation and the key hints must not be rendered in the dim colour.
+// Colour 8 (bright black) is legible on a light terminal and effectively
+// invisible on a dark one, which is what most SSH clients use.
+func TestExplanatoryTextIsNotDim(t *testing.T) {
+	// GetForeground returns lipgloss.NoColor{} when nothing is set, so the test
+	// is "the absence of a colour", not a nil check.
+	if _, unset := noteStyle.GetForeground().(lipgloss.NoColor); !unset {
+		t.Fatalf("noteStyle sets a foreground colour (%v); it must inherit the terminal's own, "+
+			"so it stays readable on both light and dark themes", noteStyle.GetForeground())
+	}
+	if _, unset := dimStyle.GetForeground().(lipgloss.NoColor); unset {
+		t.Fatal("dimStyle lost its colour; the fixture assumption is stale")
+	}
+
+	// The login explanation renders through noteStyle.
+	a := testApp(t)
+	raw := map[string]map[string]any{}
+	if err := readJSON("../../translations.json", &raw, map[string]map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	a.text = raw
+	a.cfg.name = "HAMNET RADIO BBS"
+	a.cfg.location = "HamNet"
+	a.cfg.topic = "Tests"
+	m := newFormModel(a, "en", a.t("en", "login_title"), []formField{
+		{name: "callsign", label: a.t("en", "callsign_prompt"), required: true, limit: 16},
+		{name: "password", label: a.t("en", "password"), kind: fieldPassword},
+	}, []string{"login", "forgot"})
+	m.center = true
+	m.intro = a.tList("en", "login_info")
+
+	introStyle := noteStyle.Render(m.intro[0])
+	if introStyle != m.intro[0] {
+		t.Fatalf("noteStyle changed the text (%q); with no colour profile set it should be a no-op", introStyle)
+	}
+}
+
+// Key hints go through the same style, so they are readable too.
+func TestKeyHintsUseTheReadableStyle(t *testing.T) {
+	// Wrapping collapses runs of spaces, so compare single-spaced.
+	if got := dimWrapped("TAB next  ENTER choose", 40); got != "TAB next ENTER choose" {
+		t.Fatalf("dimWrapped altered its input: %q", got)
+	}
+	a := testApp(t)
+	a.text = map[string]map[string]any{"en": {"form_hint_actions": "TAB next  ENTER choose"}}
+	m := formModel{app: a, lang: "en", title: "T", buttons: []string{"save"}}
+	m.center = true
+	view := m.View()
+	if !strings.Contains(view, "TAB next") {
+		t.Fatalf("hint missing from the centred form:\n%s", view)
+	}
+}

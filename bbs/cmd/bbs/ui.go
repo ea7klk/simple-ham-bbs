@@ -168,7 +168,7 @@ func limitLines(text string, maxLines int) string {
 func dimWrapped(text string, width int) string {
 	lines := wrapText(text, width)
 	for i := range lines {
-		lines[i] = dimStyle.Render(lines[i])
+		lines[i] = noteStyle.Render(lines[i])
 	}
 	return strings.Join(lines, "\n")
 }
@@ -490,7 +490,7 @@ func (m formModel) View() string {
 		if len(m.intro) > 0 {
 			b.WriteString("\n")
 			for _, line := range m.intro {
-				b.WriteString(centerBlock(dimStyle.Render(line), panelContentWidth) + "\n")
+				b.WriteString(centerBlock(noteStyle.Render(line), panelContentWidth) + "\n")
 			}
 			// A blank line between the explanation and the fields, so the two
 			// do not read as one block.
@@ -559,7 +559,7 @@ func (m formModel) View() string {
 		hintKey = "form_hint_submit"
 	}
 	if m.center {
-		b.WriteString("\n" + centerBlock(dimStyle.Render(m.app.t(m.lang, "form_hint_actions")), panelContentWidth))
+		b.WriteString("\n" + centerBlock(noteStyle.Render(m.app.t(m.lang, "form_hint_actions")), panelContentWidth))
 	} else {
 		b.WriteString("\n" + dimWrapped(m.app.t(m.lang, hintKey), panelContentWidth))
 	}
