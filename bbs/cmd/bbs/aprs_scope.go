@@ -7,62 +7,146 @@ import (
 
 // APRS message sections.
 //
-// Bot traffic used to sit in the same list as messages from other operators, so
-// somebody looking for a reply from a station had to page past net check-ins,
-// acknowledgements and group notices to find it. The two bots are identifiable
-// from the stored row alone — the peer *is* the bot: a sent row addresses it, a
-// received row comes from it. No column is needed and nothing has to be
-// recomputed when a message is stored.
+// The first version of this split classified by peer callsign alone: anything
+// from ANSRVR was "#APRSThursday". Production traffic showed that to be wrong on
+// the larger half of the data.
 //
-// The split is by peer rather than by content. An acknowledgement from ANSRVR
-// ("ack1B}") does not name the group, so a content rule would file it with the
-// wrong traffic and hide it from the message it acks.
+// ANSRVR is the *group server*, not a Thursday-specific bot. It carries AARN,
+// NEAPRS and every other group this station has joined, so its traffic cannot be
+// assumed to be Thursday. And the actual #APRSThursday conversation does not come
+// from ANSRVR at all: it is relayed as ordinary messages from the participants,
+// each tagged with the group in the body —
+//
+//	N:HOTG happy aprsthursday!!!          from KB3KBR-2
+//	N:HOTG Saludos desde Republica Dom.   from HI3RRR-7
+//
+// Measured on the live database: 478 messages carry the N:HOTG tag, from 413
+// distinct stations, and exactly 6 of them came from ANSRVR. Classifying by peer
+// put all 472 in "other stations" — the Thursday section was nearly empty while
+// the net itself sat elsewhere.
+//
+// So the rule is by content first, peer second:
+//
+//  1. An explicit group tag in the body decides. "N:HOTG …" is Thursday; any
+//     other "N:<GROUP> …" belongs to the group server, not to Thursday.
+//  2. Failing that, the peer decides: APRSPH is the net bot, ANSRVR is the group
+//     server.
+//  3. ANSRVR traffic that mentions HOTG but carries no tag (our own "CQ HOTG")
+//     is Thursday.
+//
+// An acknowledgement ("ack1B}") names no group, so it lands with the group
+// server rather than being guessed into Thursday. That is the honest answer:
+// better an acknowledgement in a general bucket than one filed under a net it may
+// not belong to.
 
 // aprsScope names one section of the APRS history.
 type aprsScope string
 
 const (
-	// aprsScopeDirect is traffic with another station: everything that is not
-	// addressed to, or sent by, a bot.
+	// aprsScopeDirect is traffic with another station that is not group traffic.
 	aprsScopeDirect aprsScope = "direct"
 	// aprsScopeAPRSPH is the #APRSPH net bot.
 	aprsScopeAPRSPH aprsScope = "aprsph"
-	// aprsScopeThursday is the ANSRVR group server, which carries #APRSThursday
-	// and any other group this station has joined.
+	// aprsScopeThursday is the #APRSThursday net: group traffic tagged HOTG,
+	// whichever station relayed it.
 	aprsScopeThursday aprsScope = "thursday"
+	// aprsScopeGroups is the rest of the group server's traffic — other groups,
+	// and acknowledgements that name no group at all.
+	aprsScopeGroups aprsScope = "groups"
 )
 
-// aprsScopes is the display order, direct first because it is what most callers
-// are looking for.
-var aprsScopes = []aprsScope{aprsScopeDirect, aprsScopeAPRSPH, aprsScopeThursday}
+// aprsScopes is the display order: what most callers want first, and the vague
+// bucket last.
+var aprsScopes = []aprsScope{
+	aprsScopeDirect, aprsScopeAPRSPH, aprsScopeThursday, aprsScopeGroups,
+}
 
-// aprsScopeOfPeer classifies a peer callsign-SSID.
+// aprsThursdayGroup is the ANSRVR group name for #APRSThursday.
+const aprsThursdayGroup = "HOTG"
+
+// aprsGroupTagMaxLen bounds a group name in an "N:<GROUP>" tag. Group names are
+// short in practice — HOTG, AARN, NEAPRS — but this is a shape check, not a
+// membership test: a longer token is not a group tag.
+const aprsGroupTagMaxLen = 8
+
+// aprsGroupTag extracts the group from a group-relayed body.
 //
-// The SSID is ignored: the bots answer from their base callsign, but a station
-// may address APRSPH-0 and an acknowledgement can arrive from ANSRVR with any
-// SSID. Comparing the base callsign keeps those together with the bot they
-// belong to rather than stranding them among direct traffic.
-func aprsScopeOfPeer(peer string) aprsScope {
-	base := strings.ToUpper(strings.TrimSpace(normalizeAPRSCallsign(peer)))
-	if i := strings.Index(base, "-"); i > 0 {
-		base = base[:i]
+// ANSRVR and the clients that relay it prefix group traffic with the group name:
+//
+//	N:HOTG 24 Messages Sent
+//	N:AARN Check in
+//
+// The tag is "N:", one to eight characters, then a space or the end. The bound
+// is generous because group names in the wild are not: "NEAPRS" is six, and an
+// earlier five-character limit silently pushed its traffic into "direct".
+// Anything that does not match the shape is not a tag, so ordinary text
+// beginning with "N:" cannot masquerade as one.
+func aprsGroupTag(text string) (string, bool) {
+	body := strings.TrimSpace(text)
+	upper := strings.ToUpper(body)
+	rest, ok := strings.CutPrefix(upper, "N:")
+	if !ok {
+		return "", false
 	}
-	switch base {
+	end := strings.IndexAny(rest, " {")
+	if end < 0 {
+		end = len(rest)
+	}
+	group := strings.TrimSpace(rest[:end])
+	if group == "" || len(group) > aprsGroupTagMaxLen {
+		return "", false
+	}
+	return group, true
+}
+
+// aprsMentionsThursday reports whether a body names the #APRSThursday group or
+// net, which is how our own outgoing commands identify it: "CQ HOTG", "K HOTG",
+// "U HOTG".
+func aprsMentionsThursday(text string) bool {
+	upper := strings.ToUpper(text)
+	if strings.Contains(upper, aprsThursdayGroup) {
+		return true
+	}
+	return strings.Contains(upper, "APRSTHURSDAY")
+}
+
+// aprsScopeOfMessage classifies one stored message.
+//
+// peer is the other end of the conversation — the sender of a received message,
+// the addressee of a sent one — and text is the body as stored.
+func aprsScopeOfMessage(peer, text string) aprsScope {
+	if group, ok := aprsGroupTag(text); ok {
+		if group == aprsThursdayGroup {
+			return aprsScopeThursday
+		}
+		// A different group on the group server. Not Thursday, and not a
+		// conversation with a station either.
+		return aprsScopeGroups
+	}
+	switch aprsBaseCallsign(peer) {
 	case aprsBotAPRSPH:
 		return aprsScopeAPRSPH
 	case aprsBotANSRVR:
-		return aprsScopeThursday
+		// The group server's own messages: join and leave confirmations, and
+		// acknowledgements. Ours are Thursday commands; anything else here names
+		// no group, so it stays with the group server.
+		if aprsMentionsThursday(text) {
+			return aprsScopeThursday
+		}
+		return aprsScopeGroups
 	}
 	return aprsScopeDirect
 }
 
-// scopeKey is the translation key for a section's label.
+// labelKey is the translation key for a section's label.
 func (s aprsScope) labelKey() string {
 	switch s {
 	case aprsScopeAPRSPH:
 		return "aprs_section_aprsph"
 	case aprsScopeThursday:
 		return "aprs_section_thursday"
+	case aprsScopeGroups:
+		return "aprs_section_groups"
 	}
 	return "aprs_section_direct"
 }
@@ -74,6 +158,8 @@ func (s aprsScope) descriptionKey() string {
 		return "aprs_section_aprsph_desc"
 	case aprsScopeThursday:
 		return "aprs_section_thursday_desc"
+	case aprsScopeGroups:
+		return "aprs_section_groups_desc"
 	}
 	return "aprs_section_direct_desc"
 }
@@ -82,7 +168,7 @@ func (s aprsScope) descriptionKey() string {
 func filterReceivedByScope(rows []receivedAPRS, scope aprsScope) []receivedAPRS {
 	out := make([]receivedAPRS, 0, len(rows))
 	for _, row := range rows {
-		if aprsScopeOfPeer(row.From) == scope {
+		if aprsScopeOfMessage(row.From, row.Text) == scope {
 			out = append(out, row)
 		}
 	}
@@ -93,7 +179,7 @@ func filterReceivedByScope(rows []receivedAPRS, scope aprsScope) []receivedAPRS 
 func filterSentByScope(rows []sentAPRS, scope aprsScope) []sentAPRS {
 	out := make([]sentAPRS, 0, len(rows))
 	for _, row := range rows {
-		if aprsScopeOfPeer(row.To) == scope {
+		if aprsScopeOfMessage(row.To, row.Text) == scope {
 			out = append(out, row)
 		}
 	}
@@ -105,7 +191,7 @@ func filterSentByScope(rows []sentAPRS, scope aprsScope) []sentAPRS {
 func countReceivedScopes(rows []receivedAPRS) map[aprsScope]int {
 	counts := map[aprsScope]int{}
 	for _, row := range rows {
-		counts[aprsScopeOfPeer(row.From)]++
+		counts[aprsScopeOfMessage(row.From, row.Text)]++
 	}
 	return counts
 }
@@ -114,7 +200,7 @@ func countReceivedScopes(rows []receivedAPRS) map[aprsScope]int {
 func countSentScopes(rows []sentAPRS) map[aprsScope]int {
 	counts := map[aprsScope]int{}
 	for _, row := range rows {
-		counts[aprsScopeOfPeer(row.To)]++
+		counts[aprsScopeOfMessage(row.To, row.Text)]++
 	}
 	return counts
 }
