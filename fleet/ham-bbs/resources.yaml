@@ -38,7 +38,7 @@ spec:
             name: bbs-smtp
         - secretRef:
             name: bbs-env
-        image: ghcr.io/ea7klk/simple-ham-bbs@sha256:1c560bae0f813c17b64199f7a8d77cf5328c47e68dd9b7fb58d9f9dfebcfedff
+        image: ghcr.io/ea7klk/simple-ham-bbs@sha256:fbac1688095741e6d1f66373e3ea7d7078dbf5fe7fc1113584221e5dfde51acd
         imagePullPolicy: IfNotPresent
         name: bbs
         ports:
@@ -154,7 +154,7 @@ spec:
             name: bbs-smtp
         - secretRef:
             name: bbs-env
-        image: ghcr.io/ea7klk/simple-ham-bbs@sha256:1c560bae0f813c17b64199f7a8d77cf5328c47e68dd9b7fb58d9f9dfebcfedff
+        image: ghcr.io/ea7klk/simple-ham-bbs@sha256:fbac1688095741e6d1f66373e3ea7d7078dbf5fe7fc1113584221e5dfde51acd
         imagePullPolicy: IfNotPresent
         name: bbs-aprs
         resources:
