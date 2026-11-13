@@ -292,7 +292,8 @@
     "aprs_section_thursday_desc": "Gruppenserver-Verkehr von ANSRVR, den #APRSThursday nutzt.",
     "login_title": "Anmelden / Registrieren",
     "aprs_section_groups": "Gruppenserver",
-    "aprs_section_groups_desc": "ANSRVR-Verkehr anderer Gruppen als #APRSThursday sowie Bestätigungen ohne Gruppennamen."
+    "aprs_section_groups_desc": "ANSRVR-Verkehr anderer Gruppen als #APRSThursday sowie Bestätigungen ohne Gruppennamen.",
+    "aprs_ssid0_warning": "Jede gesendete Nachricht geht von %s aus, unabhängig von der adressierten SSID. Diese Station sendet unter keiner anderen SSID."
   },
   "en": {
     "about_graphics": "Graphics: plain ANSI text, suitable for simple terminals.",
@@ -587,7 +588,8 @@
     "aprs_section_thursday_desc": "Group-server traffic from ANSRVR, which #APRSThursday uses.",
     "login_title": "Login / Register",
     "aprs_section_groups": "Group server",
-    "aprs_section_groups_desc": "ANSRVR traffic from groups other than #APRSThursday, and acknowledgements that name no group."
+    "aprs_section_groups_desc": "ANSRVR traffic from groups other than #APRSThursday, and acknowledgements that name no group.",
+    "aprs_ssid0_warning": "Every message you send leaves from %s, whatever SSID you address. This station does not transmit from any other SSID."
   },
   "es": {
     "about_graphics": "Gráficos: texto ANSI simple, apto para terminales sencillos.",
@@ -882,7 +884,8 @@
     "aprs_section_thursday_desc": "Tráfico del servidor de grupos ANSRVR, que usa #APRSThursday.",
     "login_title": "Entrar / Registrarse",
     "aprs_section_groups": "Servidor de grupos",
-    "aprs_section_groups_desc": "Tráfico de ANSRVR de grupos distintos de #APRSThursday y acuses que no nombran ningún grupo."
+    "aprs_section_groups_desc": "Tráfico de ANSRVR de grupos distintos de #APRSThursday y acuses que no nombran ningún grupo.",
+    "aprs_ssid0_warning": "Todos los mensajes que envíes salen desde %s, sea cual sea la SSID que addresses. Esta estación no transmite desde ninguna otra SSID."
   },
   "fr": {
     "about_graphics": "Graphismes : texte ANSI simple, adapté aux terminaux simples.",
@@ -1177,6 +1180,7 @@
     "aprs_section_thursday_desc": "Trafic du serveur de groupes ANSRVR, utilisé par #APRSThursday.",
     "login_title": "Connexion / Inscription",
     "aprs_section_groups": "Serveur de groupes",
-    "aprs_section_groups_desc": "Trafic ANSRVR des groupes autres que #APRSThursday, et accusés qui ne nomment aucun groupe."
+    "aprs_section_groups_desc": "Trafic ANSRVR des groupes autres que #APRSThursday, et accusés qui ne nomment aucun groupe.",
+    "aprs_ssid0_warning": "Chaque message que tu envoies part de %s, quelle que soit la SSID visée. Cette station n'émet depuis aucune autre SSID."
   }
 }

@@ -793,6 +793,12 @@ func (a *app) runForm(lang, title string, fields []formField, buttons []string) 
 // The hook keeps the plain signature, so tests that drive forms through
 // runFormHook are unaffected by layout.
 func (a *app) runFormStyled(lang, title string, fields []formField, buttons []string, style formStyle) (string, map[string]string, bool) {
+	// A style-aware hook first, then the plain one. Without this the layout — and
+	// with it the introductory warning — is invisible to a test that stubs the
+	// form.
+	if a.runFormStyledHook != nil {
+		return a.runFormStyledHook(lang, title, fields, buttons, style)
+	}
 	if a.runFormHook != nil {
 		return a.runFormHook(lang, title, fields, buttons)
 	}

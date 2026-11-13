@@ -145,6 +145,25 @@ func (a *app) showReceivedAPRS(callsign string, profile userProfile, lang string
 	}
 }
 
+// aprsSsid0Warning is the line shown above every APRS send form.
+//
+// Every message leaves from the base callsign with SSID 0 — see aprsSSID0 — so
+// an operator who addresses EA7KLK-15 should not expect the traffic to appear to
+// come from EA7KLK-15. Stating it at the point of sending is the only place it
+// cannot be missed. The callsign is interpolated so the line names the operator's
+// own station rather than a generic example.
+func (a *app) aprsSsid0Warning(lang, callsign string) []string {
+	const key = "aprs_ssid0_warning"
+	source := aprsSSID0(callsign)
+	tmpl := a.t(lang, key)
+	if tmpl == key {
+		// A missing key would otherwise reach Sprintf and render as
+		// "aprs_ssid0_warning%!(EXTRA string=…)", which is worse than English.
+		tmpl = "Every message you send leaves from %s, whatever SSID you address."
+	}
+	return []string{fmt.Sprintf(tmpl, source)}
+}
+
 func (a *app) sendAPRS(callsign string, profile userProfile, lang string) {
 	// A completed send returns to the APRS menu. Retry handling stays inside
 	// sendAPRSForm, so this entry point must not reopen the send form.
@@ -158,11 +177,11 @@ func (a *app) sendAPRSForm(callsign string, profile userProfile, lang, destinati
 			a.showInfo(lang, a.t(lang, "aprs_send_message"), [][]string{{a.t(lang, "aprs_status"), boolString(profile.EnableAPRS)}, {a.t(lang, "aprs_ssid_info")}, {a.t(lang, "aprs_enable_required")}})
 			return false
 		}
-		action, values, ok := a.runForm(lang, a.t(lang, "aprs_send_message"), []formField{
+		action, values, ok := a.runFormStyled(lang, a.t(lang, "aprs_send_message"), []formField{
 			{name: "destination", label: a.t(lang, "aprs_destination_callsign"), value: destCall, required: true, limit: 10, width: 10, sameLine: true, normalizer: normalizeAPRSCallsign, validator: validAPRSBaseCallsign, invalidText: a.t(lang, "aprs_invalid_destination")},
 			{name: "destination_ssid", label: a.t(lang, "aprs_destination_ssid"), value: destSSID, limit: 2, width: 2, sameLine: true, normalizer: normalizeAPRSSSID, validator: validAPRSSSID, invalidText: a.t(lang, "aprs_invalid_ssid")},
 			{name: "text", label: a.t(lang, "aprs_text"), kind: fieldTextArea, limit: 2000},
-		}, []string{"send", "cancel"})
+		}, []string{"send", "cancel"}, formStyle{Intro: a.aprsSsid0Warning(lang, callsign)})
 		if !ok || action == "cancel" {
 			return false
 		}
@@ -306,13 +325,13 @@ func (a *app) sendAPRSBotCommand(callsign string, profile userProfile, lang, tit
 				maxText = 10
 			}
 			invalidText := a.aprsCommandTooLongDetail(lang, maxText, maxText)
-			action, values, ok := a.runForm(lang, title, []formField{
+			action, values, ok := a.runFormStyled(lang, title, []formField{
 				{
 					name: "text", label: a.t(lang, "aprs_ansrvr_text"), kind: fieldTextArea, required: true,
 					validator:   func(v string) bool { return len([]rune(v)) <= maxText },
 					invalidText: invalidText,
 				},
-			}, []string{"send", "cancel"})
+			}, []string{"send", "cancel"}, formStyle{Intro: a.aprsSsid0Warning(lang, callsign)})
 			if !ok || action == "cancel" {
 				return false
 			}
@@ -874,13 +893,31 @@ func (a *app) sendAPRSParts(source string, passcode int, destination string, par
 	return out, allOK
 }
 
+// aprsAckSource is the station an acknowledgement is sent from: the addressee of
+// the message being acknowledged, with its SSID intact.
+//
+// An APRS client matches an acknowledgement by comparing the ack's source with
+// the addressee it used. Forcing the source to SSID 0 — as this did before — means
+// a station that messaged EA7KLK-15 got "ack…" from EA7KLK-0 and, seeing a
+// different station, left the message marked unacknowledged and retried it.
+//
+// A bare addressee stays bare. In AX.25 the SSID 0 station is written without the
+// suffix, so "EA7KLK" and "EA7KLK-0" are the same station but not the same string,
+// and it is the string the sender will compare.
+func aprsAckSource(addressee string) string {
+	return normalizeAPRSCallsign(addressee)
+}
+
 func (a *app) sendAPRSAck(source, destination, messageID string) error {
-	source = aprsSSID0(source)
+	source = aprsAckSource(source)
 	destination = normalizeAPRSCallsign(destination)
 	messageID = normalizeAPRSMessageID(messageID)
 	if !validAPRSCallsign(source) {
 		return fmt.Errorf("invalid APRS ACK source: %s", source)
 	}
+	// The passcode is derived from the base callsign, so an SSID does not change
+	// it: EA7KLK-15 logs in with the EA7KLK validation code, which is what
+	// APRS-IS expects.
 	if !validAPRSCallsign(destination) {
 		return fmt.Errorf("invalid APRS ACK destination: %s", destination)
 	}

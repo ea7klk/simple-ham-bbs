@@ -107,6 +107,7 @@ type app struct {
 	mail                *mailer
 	runMenuHook         func(lang, title, header string, opts []option) string
 	runFormHook         func(lang, title string, fields []formField, buttons []string) (string, map[string]string, bool)
+	runFormStyledHook   func(lang, title string, fields []formField, buttons []string, style formStyle) (string, map[string]string, bool)
 	showInfoHook        func(lang, title string, rows [][]string)
 	showInfoActionsHook func(lang, title string, rows [][]string, actions []option) string
 	confirmDeleteHook   func(lang, prompt string) bool

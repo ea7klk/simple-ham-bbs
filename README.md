@@ -276,7 +276,14 @@ who have `Enable APRS` set to `true`. Received messages are stored per callsign
 in the database and are shown under `Received APRS messages` in the APRS menu.
 APRS message IDs appended by senders, such as `{2044`, are removed from the
 user-facing message text before storage/display, while the raw packet field is
-preserved as received. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
+preserved as received.
+
+Every message the BBS sends leaves from the base callsign with **SSID 0**
+(`EA7KLK-0`), whatever SSID the recipient has; the send forms say so before you
+type. Acknowledgements are the exception and follow the message: one for a message
+addressed to `EA7KLK-15` goes out from `EA7KLK-15`, because that is the station the
+sender compares against when it clears the message. Signalling it from `EA7KLK-0`
+made the sender see a different station and keep retrying. Set `APRS_RECEIVER_CALLSIGN` in `.env` to choose the
 receive-only APRS-IS login callsign; if it is empty, the receiver uses the
 first valid callsign from `BBS_SYSOPS`, then falls back to `N0CALL`. The
 receiver exits once per hour; the supervisor restarts it so the APRS-IS
