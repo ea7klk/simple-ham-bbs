@@ -3,6 +3,15 @@ set -euo pipefail
 
 : "${BBS_USER_PASSWORD:=change-this-password}"
 : "${BBS_GUEST_MODE:=false}"
+# Both default to true, so an image that sets neither behaves exactly as before.
+#
+# BBS_SSH_ENABLED=false turns this container into something other than the SSH
+# service: no login password, host keys or authorized keys are touched.
+# BBS_APRS_EMBEDDED=false stops it from starting an APRS supervisor, for a
+# deployment that runs reception in its own pod so that redeploying this one
+# cannot interrupt it.
+: "${BBS_SSH_ENABLED:=true}"
+: "${BBS_APRS_EMBEDDED:=true}"
 
 data_dir="${BBS_DATA_DIR:-/var/lib/bbs}"
 host_key_dir="/config/ssh/host_keys"
@@ -124,12 +133,20 @@ start_helper_processes() {
 }
 
 write_bbs_env
-configure_login_password
 prepare_runtime_dirs
-ensure_host_keys
 configure_fallback_route
-install_authorized_keys
+if [ "${BBS_SSH_ENABLED}" = "true" ]; then
+  configure_login_password
+  ensure_host_keys
+  install_authorized_keys
+else
+  echo "SSH setup skipped (BBS_SSH_ENABLED=false); this container is not the SSH service." >&2
+fi
 migrate_schema
-start_helper_processes
+if [ "${BBS_APRS_EMBEDDED}" = "true" ]; then
+  start_helper_processes
+else
+  echo "APRS reception is not embedded here (BBS_APRS_EMBEDDED=false); it runs in its own pod." >&2
+fi
 
 exec "$@"

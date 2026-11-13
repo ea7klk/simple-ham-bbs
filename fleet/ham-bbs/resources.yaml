@@ -30,6 +30,9 @@ spec:
         - /sbin/tini
         - --
         - /usr/local/bin/docker-entrypoint.sh
+        env:
+        - name: BBS_APRS_EMBEDDED
+          value: "false"
         envFrom:
         - secretRef:
             name: bbs-smtp
@@ -93,6 +96,90 @@ spec:
           medium: Memory
           sizeLimit: '67108864'
         name: shm
+---
+# APRS reception runs here, not inside the SSH service or the web app, so that
+# redeploying either of those cannot interrupt it.
+#
+# The volume is ReadWriteOnce and provisioned by local-path, which pins it to one
+# node; every pod that mounts it must therefore be scheduled to that node, hence
+# the same nodeSelector as `bbs`. Several pods on the node may share a
+# ReadWriteOnce claim — the restriction is per node, not per pod.
+#
+# Only one receiver may run at a time: two would write the same rows and both
+# acknowledge the same message. `bbs_app` enforces that with an exclusive flock on
+# the shared volume, so a rolling update hands over rather than overlapping: the
+# replacement starts, waits for the lock, and takes over the moment the old pod
+# exits. Reception stops for the moment it takes to release and re-acquire, not
+# for the whole rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bbs-aprs
+  namespace: ham-bbs
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bbs-aprs
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bbs-aprs
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - /usr/local/bin/bbs_app
+        - aprs-supervisor
+        command:
+        - /sbin/tini
+        - --
+        - /usr/local/bin/docker-entrypoint.sh
+        env:
+        - name: BBS_SSH_ENABLED
+          value: "false"
+        - name: BBS_APRS_EMBEDDED
+          value: "false"
+        envFrom:
+        - secretRef:
+            name: bbs-smtp
+        - secretRef:
+            name: bbs-env
+        image: ghcr.io/ea7klk/simple-ham-bbs@sha256:1c560bae0f813c17b64199f7a8d77cf5328c47e68dd9b7fb58d9f9dfebcfedff
+        imagePullPolicy: IfNotPresent
+        name: bbs-aprs
+        resources:
+          requests:
+            cpu: 10m
+            memory: 48Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/bbs
+          name: v-daedbc100d077ade
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: registry-credentials
+      nodeSelector:
+        kubernetes.io/hostname: spainip-k3s
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      # Long enough for an in-flight APRS-IS transaction to finish; short enough
+      # that a rollout is not perceived as a gap in reception.
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: v-daedbc100d077ade
+        persistentVolumeClaim:
+          claimName: v-daedbc100d077ade
 ---
 apiVersion: v1
 kind: Service

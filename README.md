@@ -219,11 +219,53 @@ in SQLite through GORM. The default database path is:
 The latest 200 sent APRS messages and 500 received APRS messages per BBS user
 are retained in the database.
 
-The container also starts an APRS supervisor helper:
+The container also starts an APRS supervisor helper, unless
+`BBS_APRS_EMBEDDED=false`:
 
 ```sh
 /usr/local/bin/bbs_app aprs-supervisor
 ```
+
+### Running reception in its own pod
+
+APRS reception does not depend on anybody being logged in, so it should not
+depend on the SSH service being up either. Embedding it in the SSH container
+means every redeploy of that container — a new image, a config change, a
+`rollout restart` — interrupts reception for as long as the pod takes to cycle.
+
+Setting `BBS_APRS_EMBEDDED=false` stops the container starting a supervisor, and
+a separate Deployment runs one:
+
+```yaml
+args: ["/usr/local/bin/bbs_app", "aprs-supervisor"]
+env:
+  - name: BBS_SSH_ENABLED
+    value: "false"      # this container is not the SSH service
+  - name: BBS_APRS_EMBEDDED
+    value: "false"      # and it does not spawn a second supervisor
+```
+
+`BBS_SSH_ENABLED=false` skips the login password, host keys and
+`authorized_keys` — pointless work in a container that starts no `sshd`. Both
+variables default to `true`, so an image that sets neither behaves exactly as
+before.
+
+The database volume is `ReadWriteOnce` and local-path provisioned, which pins it
+to one node, so every pod mounting it must be scheduled there. Several pods on
+that node may share the claim: the restriction is per node, not per pod.
+
+**Only one receiver may run at a time.** Two would write the same rows and both
+acknowledge the same message, putting a duplicate ACK on the air under the
+operator's callsign. `bbs_app` takes an exclusive `flock` on
+`$BBS_DATA_DIR/.aprs-reception.lock` before it starts reception, and a second
+process waits for it rather than starting a rival receiver. That is what makes a
+rolling update safe: the replacement starts, waits, and takes over the instant
+the old pod exits — reception pauses for the handover, not for the rollout.
+
+When reception is embedded, the supervisor tails the runtime logs into this
+container's stdout. When it is separated, it does so from the receiver pod, so
+`kubectl logs deploy/bbs` no longer shows APRS lines — they are in
+`kubectl logs deploy/bbs-aprs`.
 
 The supervisor tails APRS logs into the container's own stdout (so they appear
 in `kubectl logs`, or `docker compose logs` for a local run), rotates those
