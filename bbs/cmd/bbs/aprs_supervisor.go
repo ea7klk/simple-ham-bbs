@@ -28,6 +28,17 @@ const (
 var supervisorOutputMu sync.Mutex
 
 func (a *app) runAPRSSupervisor() error {
+	// Reception ownership comes first: a standby must not tail logs or rotate
+	// files, because the owner is already doing both.
+	lock, err := a.claimAPRSReception()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = unlockFile(lock)
+		_ = lock.Close()
+	}()
+
 	if err := a.ensureRuntimeLogFiles(); err != nil {
 		return err
 	}
@@ -37,7 +48,55 @@ func (a *app) runAPRSSupervisor() error {
 	go a.rotateRuntimeLogsNightly()
 
 	a.logAPRSReceiver("APRS supervisor started; nightly log rotation at 03:00 UTC, retention=7 days")
+	if a.receiverRunner != nil {
+		return a.receiverRunner()
+	}
 	return a.watchAPRSReceiver()
+}
+
+// aprsReceptionLockPath is the file whose exclusive lock marks the one process
+// that owns APRS reception.
+func (a *app) aprsReceptionLockPath() string {
+	return filepath.Join(a.cfg.dataDir, ".aprs-reception.lock")
+}
+
+// claimAPRSReception takes exclusive ownership of APRS reception, blocking until
+// it has it.
+//
+// Only one receiver may run against this database. Two would write the same rows,
+// and worse, both would acknowledge the same message — a duplicate ACK on the air
+// under the operator's callsign. Reception now lives in its own pod while sessions
+// live in another, so an overlap is ordinary rather than exceptional: during a
+// rollout the old and new pods are both running for a few seconds.
+//
+// The lock is on the shared volume, so it is held across pods on the same node,
+// which is where this deployment places them (the volume is ReadWriteOnce).
+// A standby waits rather than failing, so handover is continuous: the old pod
+// exits, releases the lock, and the waiting process takes over with no gap in
+// reception and no window in which two receivers both ACK.
+func (a *app) claimAPRSReception() (*os.File, error) {
+	path := a.aprsReceptionLockPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	owned, err := tryLockFile(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !owned {
+		a.logAPRSReceiver("another process owns APRS reception; standing by until it exits")
+		if err := lockFile(file); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
+		a.logAPRSReceiver("APRS reception handed over to this process")
+	}
+	return file, nil
 }
 
 func (a *app) ensureRuntimeLogFiles() error {

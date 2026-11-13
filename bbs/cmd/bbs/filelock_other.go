@@ -10,3 +10,7 @@ import "os"
 func lockFile(*os.File) error { return nil }
 
 func unlockFile(*os.File) error { return nil }
+
+// tryLockFile reports success on platforms without flock: there is only one
+// process to contend with locally.
+func tryLockFile(*os.File) (bool, error) { return true, nil }

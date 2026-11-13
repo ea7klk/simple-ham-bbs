@@ -110,6 +110,10 @@ type app struct {
 	showInfoHook        func(lang, title string, rows [][]string)
 	showInfoActionsHook func(lang, title string, rows [][]string, actions []option) string
 	confirmDeleteHook   func(lang, prompt string) bool
+	// receiverRunner starts the supervised receiver loop. It is nil in
+	// production; a test sets it so the ordering around the reception lock can be
+	// asserted without spawning a second copy of the test binary.
+	receiverRunner func() error
 }
 
 type userProfile struct {
